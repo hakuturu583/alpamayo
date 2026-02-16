@@ -242,8 +242,13 @@ def main():
     parser.add_argument(
         "--model-path",
         type=str,
-        default=None,
-        help="Path to Alpamayo R1 model checkpoint (optional)",
+        default="nvidia/AlpamayoR1",
+        help="Path or HuggingFace model ID for Alpamayo R1 (default: nvidia/AlpamayoR1)",
+    )
+    parser.add_argument(
+        "--no-model",
+        action="store_true",
+        help="Disable model loading and run without inference",
     )
 
     args = parser.parse_args()
@@ -255,10 +260,10 @@ def main():
     print(f"  Pedestrian NPCs: {args.num_pedestrians}")
     print(f"  Simulation steps: {args.num_steps}")
 
-    # Load model if path provided
+    # Load model unless --no-model is specified
     model = None
     processor = None
-    if args.model_path:
+    if not args.no_model:
         print(f"Loading Alpamayo R1 model from {args.model_path}")
         try:
             import torch
@@ -284,7 +289,7 @@ def main():
             model = None
             processor = None
     else:
-        print("No model path provided - running without model inference")
+        print("Model loading disabled (--no-model) - running without inference")
 
     # Create simulation
     with CARLASimulation(host=args.host, port=args.port, map_name=args.map) as sim:

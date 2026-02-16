@@ -248,17 +248,18 @@ with CARLASimulation(host="localhost", port=2000) as sim:
 ### Running Autonomous Scenario
 
 ```bash
-# Basic autonomous driving (rule-based controller)
+# With Alpamayo R1 model from HuggingFace (default)
 python -m alpamayo_r1.carla.autonomous_scenario
 
-# With Alpamayo R1 model
+# With local model checkpoint
 python -m alpamayo_r1.carla.autonomous_scenario \
-    --model-path /path/to/alpamayo_r1_model
+    --model-path /path/to/local/checkpoint
+
+# Without model (rule-based controller only)
+python -m alpamayo_r1.carla.autonomous_scenario --no-model
 
 # With Rerun visualization
-python -m alpamayo_r1.carla.autonomous_scenario \
-    --model-path /path/to/alpamayo_r1_model \
-    --use-rerun
+python -m alpamayo_r1.carla.autonomous_scenario --use-rerun
 
 # Remote server with custom parameters
 python -m alpamayo_r1.carla.autonomous_scenario \
@@ -268,14 +269,17 @@ python -m alpamayo_r1.carla.autonomous_scenario \
     --num-vehicles 100 \
     --num-pedestrians 50 \
     --target-speed 8.0 \
-    --model-path /path/to/alpamayo_r1_model \
     --use-rerun
 ```
 
-**Note**: The Alpamayo R1 model will be loaded at scenario setup time with:
-- `torch_dtype=torch.bfloat16` for efficiency
-- `device_map="auto"` for automatic GPU selection
-- Model is set to eval mode automatically
+**Note**:
+- By default, the model is loaded from HuggingFace Hub: `nvidia/AlpamayoR1`
+- Model loading uses:
+  - `torch_dtype=torch.bfloat16` for efficiency
+  - `device_map="auto"` for automatic GPU selection
+  - Automatic eval mode
+- Use `--no-model` to disable model loading and use rule-based controller
+- Use `--model-path` to specify a local checkpoint or different HuggingFace model
 
 ### Autonomous Scenario Arguments
 
@@ -286,7 +290,8 @@ python -m alpamayo_r1.carla.autonomous_scenario \
 - `--num-pedestrians`: Number of pedestrian NPCs (default: 30)
 - `--num-steps`: Simulation steps (default: 2000)
 - `--spawn-point`: Ego vehicle spawn point index (default: 0)
-- `--model-path`: Path to Alpamayo R1 checkpoint (optional)
+- `--model-path`: Path or HuggingFace model ID (default: nvidia/AlpamayoR1)
+- `--no-model`: Disable model loading (use rule-based controller)
 - `--use-rerun`: Enable Rerun visualization
 - `--target-speed`: Target speed in m/s (default: 5.0)
 
