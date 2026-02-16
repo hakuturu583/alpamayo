@@ -175,7 +175,7 @@ class AlpamayoController:
                     top_p=0.98,
                     temperature=0.6,
                     num_traj_samples=1,
-                    max_generation_length=64,  # Reduced from 256 to save VRAM
+                    max_generation_length=16,  # Reduced from 256 to save VRAM
                     return_extra=True,
                 )
 
