@@ -27,6 +27,7 @@ class CameraConfig:
 
     # Camera configurations: (name, fov, transform)
     # Transform: (x, y, z, pitch, yaw, roll) in meters and degrees
+    # Only cameras used in test_inference.py (matching load_physical_aiavdataset.py defaults)
     CAMERAS = [
         {
             "name": "camera_cross_left_120fov",
@@ -53,33 +54,6 @@ class CameraConfig:
             "transform": carla.Transform(
                 carla.Location(x=0.0, y=-1.2, z=1.5),
                 carla.Rotation(pitch=0.0, yaw=90.0, roll=0.0),
-            ),
-        },
-        {
-            "name": "camera_rear_left_70fov",
-            "index": 3,
-            "fov": 70.0,
-            "transform": carla.Transform(
-                carla.Location(x=-1.5, y=0.8, z=1.5),
-                carla.Rotation(pitch=0.0, yaw=-150.0, roll=0.0),
-            ),
-        },
-        {
-            "name": "camera_rear_tele_30fov",
-            "index": 4,
-            "fov": 30.0,
-            "transform": carla.Transform(
-                carla.Location(x=-1.8, y=0.0, z=1.5),
-                carla.Rotation(pitch=0.0, yaw=180.0, roll=0.0),
-            ),
-        },
-        {
-            "name": "camera_rear_right_70fov",
-            "index": 5,
-            "fov": 70.0,
-            "transform": carla.Transform(
-                carla.Location(x=-1.5, y=-0.8, z=1.5),
-                carla.Rotation(pitch=0.0, yaw=150.0, roll=0.0),
             ),
         },
         {
