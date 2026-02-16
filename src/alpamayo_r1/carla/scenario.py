@@ -241,7 +241,7 @@ class BaseScenario(ABC):
     def spawn_ego_vehicle(
         self, spawn_point: Any = None, vehicle_model: str = "vehicle.tesla.model3"
     ) -> Any:
-        """Spawn ego vehicle at specified spawn point.
+        """Spawn ego vehicle at specified spawn point with retry logic.
 
         Args:
             spawn_point: Spawn point for ego vehicle (if None, uses spawn_point_index from config)
@@ -250,16 +250,62 @@ class BaseScenario(ABC):
         Returns:
             Spawned ego vehicle actor
         """
-        if spawn_point is None:
-            spawn_idx = self.config.get("spawn_point_index", 0)
-            spawn_point = self.allocate_spawn_points(spawn_idx)
-
         blueprint_library = self.world.get_blueprint_library()
         vehicle_bp = blueprint_library.filter(vehicle_model)[0]
-        self.ego_vehicle = self.world.spawn_actor(vehicle_bp, spawn_point)
 
-        print(f"Ego vehicle spawned at {spawn_point.location}")
-        return self.ego_vehicle
+        # If spawn_point is provided, try it first
+        if spawn_point is not None:
+            try:
+                self.ego_vehicle = self.world.spawn_actor(vehicle_bp, spawn_point)
+                print(f"Ego vehicle spawned at {spawn_point.location}")
+                return self.ego_vehicle
+            except RuntimeError as e:
+                print(f"Failed to spawn at provided spawn point: {e}")
+                print("Trying alternative spawn points...")
+
+        # Get all spawn points and try them sequentially
+        all_spawn_points = self.world.get_map().get_spawn_points()
+        if len(all_spawn_points) == 0:
+            raise RuntimeError("No spawn points available on this map")
+
+        spawn_idx = self.config.get("spawn_point_index", 0)
+        max_attempts = min(10, len(all_spawn_points))  # Try up to 10 spawn points
+
+        for attempt in range(max_attempts):
+            try_idx = (spawn_idx + attempt) % len(all_spawn_points)
+            try_point = all_spawn_points[try_idx]
+
+            try:
+                self.ego_vehicle = self.world.spawn_actor(vehicle_bp, try_point)
+                print(f"Ego vehicle spawned at spawn point {try_idx}: {try_point.location}")
+
+                # Update available spawn points (exclude the one we just used)
+                self.available_spawn_points = [
+                    sp for i, sp in enumerate(all_spawn_points) if i != try_idx
+                ]
+
+                # Update vehicle NPC limit
+                requested_vehicles = self.config.get("num_vehicles", 30)
+                max_vehicles = len(self.available_spawn_points)
+                if requested_vehicles > max_vehicles:
+                    print(
+                        f"Warning: Requested {requested_vehicles} vehicles but only "
+                        f"{max_vehicles} spawn points available. Limiting to {max_vehicles}."
+                    )
+                    self.config["num_vehicles"] = max_vehicles
+
+                return self.ego_vehicle
+
+            except RuntimeError as e:
+                if attempt < max_attempts - 1:
+                    print(f"Spawn attempt {attempt + 1} failed at point {try_idx}, trying next...")
+                else:
+                    raise RuntimeError(
+                        f"Failed to spawn ego vehicle after {max_attempts} attempts. "
+                        f"Last error: {e}"
+                    )
+
+        raise RuntimeError("Failed to spawn ego vehicle")
 
     def spawn_vehicle_npcs(self, num_vehicles: int) -> list[Any]:
         """Spawn vehicle NPCs using TrafficManager.

@@ -20,10 +20,8 @@ class AutonomousDrivingScenario(BaseScenario):
 
     def setup(self) -> None:
         """Set up the scenario."""
-        # Allocate spawn points and spawn ego vehicle
-        spawn_idx = self.config.get("spawn_point_index", 0)
-        spawn_point = self.allocate_spawn_points(spawn_idx)
-        self.spawn_ego_vehicle(spawn_point, vehicle_model="vehicle.tesla.model3")
+        # Spawn ego vehicle (will automatically handle spawn point allocation and retries)
+        self.spawn_ego_vehicle(spawn_point=None, vehicle_model="vehicle.tesla.model3")
 
     def spawn_npcs(self) -> None:
         """Spawn NPCs for the scenario."""
