@@ -152,6 +152,10 @@ class CARLASimulation:
         else:
             self.world = self.client.get_world()
 
+        # Clean up all existing actors from previous sessions
+        print("Cleaning up existing actors...")
+        self._cleanup_all_actors()
+
         # Initialize TrafficManager
         self.traffic_manager = self.client.get_trafficmanager(8000)
         self.traffic_manager.set_synchronous_mode(True)
@@ -420,6 +424,78 @@ class CARLASimulation:
         finally:
             print("Cleaning up scenario...")
             scenario.cleanup()
+
+    def _cleanup_all_actors(self) -> None:
+        """Clean up all actors in the world (vehicles, walkers, sensors).
+
+        This is called at initialization to ensure a clean state.
+        """
+        if self.world is None:
+            return
+
+        actors = self.world.get_actors()
+
+        # Categorize actors
+        vehicles = []
+        walkers = []
+        sensors = []
+        controllers = []
+
+        for actor in actors:
+            type_id = actor.type_id
+            if type_id.startswith("vehicle."):
+                vehicles.append(actor)
+            elif type_id.startswith("walker.pedestrian."):
+                walkers.append(actor)
+            elif type_id.startswith("sensor."):
+                sensors.append(actor)
+            elif type_id.startswith("controller.ai.walker"):
+                controllers.append(actor)
+
+        # Destroy in order: controllers first, then sensors, then walkers, then vehicles
+        destroyed_count = 0
+
+        for controller in controllers:
+            try:
+                if controller.is_alive:
+                    controller.stop()
+                    controller.destroy()
+                    destroyed_count += 1
+            except Exception:
+                pass
+
+        for sensor in sensors:
+            try:
+                if sensor.is_alive:
+                    sensor.destroy()
+                    destroyed_count += 1
+            except Exception:
+                pass
+
+        for walker in walkers:
+            try:
+                if walker.is_alive:
+                    walker.destroy()
+                    destroyed_count += 1
+            except Exception:
+                pass
+
+        for vehicle in vehicles:
+            try:
+                if vehicle.is_alive:
+                    vehicle.destroy()
+                    destroyed_count += 1
+            except Exception:
+                pass
+
+        if destroyed_count > 0:
+            print(f"Destroyed {destroyed_count} existing actors")
+
+        # Tick to process deletions
+        try:
+            self.world.tick()
+        except Exception:
+            pass
 
     def cleanup(self) -> None:
         """Clean up all actors and restore settings."""
