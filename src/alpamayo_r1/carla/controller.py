@@ -97,6 +97,9 @@ class AlpamayoController:
                 static=True,
             )
 
+            # Initialize timeline to avoid "Waiting for timeline" issue
+            rr.set_time("simulation_time", timestamp=0.0)
+
             # Define explicit blueprint layout with only used cameras
             blueprint = rrb.Blueprint(
                 rrb.Horizontal(
