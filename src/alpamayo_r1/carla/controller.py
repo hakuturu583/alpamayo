@@ -190,10 +190,14 @@ class AlpamayoController:
             print(f"Model inference failed: {e}")
             import traceback
             traceback.print_exc()
-            self.predicted_trajectory = None
 
-            # Clear cache on error as well
+            # Clear cache on error
             torch.cuda.empty_cache()
+
+            # Exit on model error (especially CUDA OOM)
+            print("Exiting due to model inference failure.")
+            import sys
+            sys.exit(1)
 
     def _prepare_model_input(self) -> dict[str, Any]:
         """Prepare input tensors for model inference.
