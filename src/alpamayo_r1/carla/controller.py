@@ -252,7 +252,8 @@ class AlpamayoController:
             # Use native resolution (same as test_inference.py)
             # CARLA provides 1920x1080 images
             # Convert to tensor (H, W, C) -> (C, H, W)
-            img_tensor = torch.from_numpy(image).float()
+            # Copy the array to ensure it's writable and has positive strides
+            img_tensor = torch.from_numpy(image.copy()).float()
             img_tensor = rearrange(img_tensor, "h w c -> c h w")
             image_list.append(img_tensor)
 
