@@ -42,6 +42,7 @@ dependencies = [
 [package.dev-dependencies]
 carla = [
     { name = "carla" },
+    { name = "rerun-sdk" },
 ]
 dev = [
     { name = "ipykernel" },
@@ -67,7 +68,10 @@ requires-dist = [
 ]
 
 [package.metadata.requires-dev]
-carla = [{ name = "carla", specifier = ">=0.9.15" }]
+carla = [
+    { name = "carla", specifier = ">=0.9.15" },
+    { name = "rerun-sdk", specifier = ">=0.20.0" },
+]
 dev = [
     { name = "ipykernel", specifier = ">=6.29.3" },
     { name = "ipywidgets", specifier = ">=8.1.8" },
@@ -97,6 +101,15 @@ source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/be/a5/8e3f9b6771b0b408517c82d97aed8f2036509bc247d46114925e32fe33f0/asttokens-3.0.1.tar.gz", hash = "sha256:71a4ee5de0bde6a31d64f6b13f2293ac190344478f081c3d1bccfcf5eacb0cb7", size = 62308, upload-time = "2025-11-15T16:43:48.578Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/d2/39/e7eaf1799466a4aef85b6a4fe7bd175ad2b1c6345066aa33f1f58d4b18d0/asttokens-3.0.1-py3-none-any.whl", hash = "sha256:15a3ebc0f43c2d0a50eeafea25e19046c68398e487b9f1f5b517f7c0f40f976a", size = 27047, upload-time = "2025-11-15T16:43:16.109Z" },
+]
+
+[[package]]
+name = "attrs"
+version = "25.4.0"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/6b/5c/685e6633917e101e5dcb62b9dd76946cbb57c26e133bae9e0cd36033c0a9/attrs-25.4.0.tar.gz", hash = "sha256:16d5969b87f0859ef33a48b35d55ac1be6e42ae49d5e853b597db70c35c57e11", size = 934251, upload-time = "2025-10-06T13:54:44.725Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/3a/2a/7cc015f5b9f5db42b7d48157e23356022889fc354a2813c15934b7cb5c0e/attrs-25.4.0-py3-none-any.whl", hash = "sha256:adcf7e2a1fb3b36ac48d97835bb6d8ade15b8dcce26aba8bf1d14847b57a3373", size = 67615, upload-time = "2025-10-06T13:54:43.17Z" },
 ]
 
 [[package]]
@@ -1087,6 +1100,24 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/c9/74/b3ff8e6c8446842c3f5c837e9c3dfcfe2018ea6ecef224c710c85ef728f4/requests-2.32.5.tar.gz", hash = "sha256:dbba0bac56e100853db0ea71b82b4dfd5fe2bf6d3754a8893c3af500cec7d7cf", size = 134517, upload-time = "2025-08-18T20:46:02.573Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/1e/db/4254e3eabe8020b458f1a747140d32277ec7a271daf1d235b70dc0b4e6e3/requests-2.32.5-py3-none-any.whl", hash = "sha256:2462f94637a34fd532264295e186976db0f5d453d1cdd31473c85a6a161affb6", size = 64738, upload-time = "2025-08-18T20:46:00.542Z" },
+]
+
+[[package]]
+name = "rerun-sdk"
+version = "0.29.2"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "attrs" },
+    { name = "numpy" },
+    { name = "pillow" },
+    { name = "pyarrow" },
+    { name = "typing-extensions" },
+]
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/ad/d1/6b31d12e726732dced50806b1cb0b5fb55c478ee4ac23d68f50db888cf2c/rerun_sdk-0.29.2-cp310-abi3-macosx_11_0_arm64.whl", hash = "sha256:ead2b4bb93cac553c9b524442e49ba5f34c30ab9db2225e1ed2ce2ee235ea46b", size = 112371441, upload-time = "2026-02-12T19:31:07.296Z" },
+    { url = "https://files.pythonhosted.org/packages/dc/81/9b3619b37c8a7492ccbe9ea172dedc5ffb66b83ded82b8f443c1958fe1c0/rerun_sdk-0.29.2-cp310-abi3-manylinux_2_28_aarch64.whl", hash = "sha256:a97f5601cb50c14ec665525c0cf65056167de1306958a0526ff1e8d384320076", size = 120304992, upload-time = "2026-02-12T19:31:12.499Z" },
+    { url = "https://files.pythonhosted.org/packages/63/43/2590293ce7985cbb88f9fdd67b90c36b954116f6c75639b378f098b3ff61/rerun_sdk-0.29.2-cp310-abi3-manylinux_2_28_x86_64.whl", hash = "sha256:392a7f2c3db660716b660f4b164f9b73a076100378781a3a2551edf290d00c23", size = 125305451, upload-time = "2026-02-12T19:31:17.319Z" },
+    { url = "https://files.pythonhosted.org/packages/bc/06/b73e04344f2220d48c0583270a54873bca3b93ab476cf09629941afac8e5/rerun_sdk-0.29.2-cp310-abi3-win_amd64.whl", hash = "sha256:a3ccfbac8df89519a075f9dc3499a9e715c653a19a17de00d39fd218a589e009", size = 108289765, upload-time = "2026-02-12T19:31:22.616Z" },
 ]
 
 [[package]]

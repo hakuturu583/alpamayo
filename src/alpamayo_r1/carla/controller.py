@@ -7,6 +7,9 @@ import numpy as np
 import scipy.spatial.transform as spt
 import torch
 from einops import rearrange
+from PIL import Image
+
+from alpamayo_r1 import helper
 
 
 class AlpamayoController:
@@ -70,7 +73,14 @@ class AlpamayoController:
         try:
             import rerun as rr
 
-            rr.init("alpamayo_carla", spawn=True)
+            print("Initializing Rerun visualization...")
+
+            # Initialize Rerun recording
+            rr.init("alpamayo_carla", spawn=False)
+
+            # Save to file instead of spawning viewer
+            print("Saving Rerun recording to file: alpamayo_carla.rrd")
+            rr.save("alpamayo_carla.rrd")
 
             # Set up coordinate system
             rr.log(
@@ -79,9 +89,19 @@ class AlpamayoController:
                 static=True,
             )
 
-            print("Rerun visualization initialized")
-        except ImportError:
-            print("Warning: rerun-sdk not installed, visualization disabled")
+            print("Rerun visualization initialized (saving to alpamayo_carla.rrd)")
+            print("After simulation completes, view recording with:")
+            print("  rerun alpamayo_carla.rrd")
+
+        except ImportError as e:
+            print(f"Warning: rerun-sdk not installed - {e}")
+            print("Install with: pip install rerun-sdk")
+            self.use_rerun = False
+        except Exception as e:
+            print(f"Error initializing Rerun: {e}")
+            print(f"Error type: {type(e).__name__}")
+            import traceback
+            traceback.print_exc()
             self.use_rerun = False
 
     def update(self, world_snapshot: Any, camera_images: dict[str, np.ndarray]) -> None:
@@ -97,11 +117,14 @@ class AlpamayoController:
         # Update ego state
         self._update_ego_state()
 
-        # Run model inference at control frequency
+        # Run model inference at control frequency (10Hz)
         if self.step_count - self.last_control_step >= (1.0 / self.control_frequency) * 20:
             self._run_inference()
-            self._apply_control()
             self.last_control_step = self.step_count
+
+        # Apply control EVERY frame (using latest prediction from model)
+        # This allows smooth control at simulation rate (20Hz) while inference runs at 10Hz
+        self._apply_control()
 
         # Update visualization
         if self.use_rerun:
@@ -138,33 +161,54 @@ class AlpamayoController:
 
     def _run_inference(self) -> None:
         """Run Alpamayo R1 model inference on current observations."""
-        if self.model is None or len(self.current_images) == 0:
+        if self.model is None or self.processor is None or len(self.current_images) == 0:
             return
 
         try:
             # Prepare input data
             model_input = self._prepare_model_input()
 
-            # Run inference
-            with torch.no_grad():
-                outputs = self.model(**model_input)
+            # Run inference with no_grad and autocast to reduce VRAM usage
+            with torch.no_grad(), torch.autocast("cuda", dtype=torch.bfloat16):
+                pred_xyz, pred_rot, extra = self.model.sample_trajectories_from_data_with_vlm_rollout(
+                    data=model_input,
+                    top_p=0.98,
+                    temperature=0.6,
+                    num_traj_samples=1,
+                    max_generation_length=64,  # Reduced from 256 to save VRAM
+                    return_extra=True,
+                )
 
-            # Extract predicted trajectory
-            self.predicted_trajectory = self._extract_trajectory(outputs)
+            # Extract predicted trajectory (use first sample)
+            # pred_xyz shape: [batch_size, num_traj_sets, num_traj_samples, num_timesteps, 3]
+            self.predicted_trajectory = pred_xyz.cpu().numpy()[0, 0, 0]  # (num_timesteps, 3)
+
+            # Clear CUDA cache to free memory for next inference
+            torch.cuda.empty_cache()
 
         except Exception as e:
             print(f"Model inference failed: {e}")
+            import traceback
+            traceback.print_exc()
             self.predicted_trajectory = None
 
-    def _prepare_model_input(self) -> dict[str, torch.Tensor]:
+            # Clear cache on error as well
+            torch.cuda.empty_cache()
+
+    def _prepare_model_input(self) -> dict[str, Any]:
         """Prepare input tensors for model inference.
 
         Returns:
             Dictionary of input tensors for the model
         """
-        # Convert camera images to tensors
-        image_list = []
-        camera_indices = []
+        # Use only the 4 cameras that test_inference.py uses (to match memory usage)
+        # Indices: 0, 1, 2, 6
+        used_cameras = [
+            "camera_cross_left_120fov",      # index 0
+            "camera_front_wide_120fov",      # index 1
+            "camera_cross_right_120fov",     # index 2
+            "camera_front_tele_30fov",       # index 6
+        ]
 
         camera_name_to_index = {
             "camera_cross_left_120fov": 0,
@@ -176,23 +220,43 @@ class AlpamayoController:
             "camera_front_tele_30fov": 6,
         }
 
-        for cam_name, image in sorted(self.current_images.items()):
-            # Convert to tensor and normalize
-            # Use .copy() to ensure contiguous memory layout (fixes negative stride issue)
-            img_tensor = torch.from_numpy(image.copy()).float() / 255.0
+        # Filter and sort cameras by index (only use the 4 cameras)
+        sorted_cameras = sorted(
+            [(name, img) for name, img in self.current_images.items() if name in used_cameras],
+            key=lambda x: camera_name_to_index.get(x[0], 999)
+        )
+
+        image_list = []
+        for cam_name, image in sorted_cameras:
+            # Downscale images to reduce VRAM usage
+            # 1920x1080 -> 640x360 (1/3 scale)
+            image_pil = Image.fromarray(image)
+            image_resized = image_pil.resize((640, 360), Image.LANCZOS)
+            image_resized = np.array(image_resized)
+
+            # Convert to tensor (H, W, C) -> (C, H, W)
+            img_tensor = torch.from_numpy(image_resized.copy()).float()
             img_tensor = rearrange(img_tensor, "h w c -> c h w")
             image_list.append(img_tensor)
 
-            cam_idx = camera_name_to_index.get(cam_name, 0)
-            camera_indices.append(cam_idx)
-
-        # Stack images: (N_cameras, 3, H, W)
+        # Stack images: (N_cameras, C, H, W)
         images = torch.stack(image_list, dim=0)
 
-        # Add batch and frame dimensions: (1, N_cameras, 1, 3, H, W)
-        images = images.unsqueeze(0).unsqueeze(2)
+        # Create messages from images using helper
+        # helper.create_message expects (N, C, H, W)
+        messages = helper.create_message(images)
 
-        # Prepare ego history (simplified - use recent history)
+        # Tokenize using processor
+        tokenized_inputs = self.processor.apply_chat_template(
+            messages,
+            tokenize=True,
+            add_generation_prompt=False,
+            continue_final_message=True,
+            return_dict=True,
+            return_tensors="pt",
+        )
+
+        # Prepare ego history
         num_history = min(16, len(self.ego_history_xyz))
         if num_history > 0:
             history_xyz = np.array(self.ego_history_xyz[-num_history:])
@@ -208,19 +272,40 @@ class AlpamayoController:
                 current_rot_inv * spt.Rotation.from_matrix(history_rot)
             ).as_matrix()
 
-            ego_history_xyz = torch.from_numpy(history_xyz_local).float().unsqueeze(0).unsqueeze(0)
-            ego_history_rot = torch.from_numpy(history_rot_local).float().unsqueeze(0).unsqueeze(0)
+            # Add batch and temporal dimensions to match expected shape
+            ego_history_xyz = torch.from_numpy(history_xyz_local).float()
+            ego_history_xyz = ego_history_xyz.unsqueeze(0).unsqueeze(0)  # (1, 1, T, 3)
+
+            ego_history_rot = torch.from_numpy(history_rot_local).float()
+            ego_history_rot = ego_history_rot.unsqueeze(0).unsqueeze(0)  # (1, 1, T, 3, 3)
+
+            # Pad to 16 timesteps if needed
+            if num_history < 16:
+                pad_length = 16 - num_history
+                ego_history_xyz = torch.cat([
+                    torch.zeros(1, 1, pad_length, 3),
+                    ego_history_xyz
+                ], dim=2)
+                ego_history_rot = torch.cat([
+                    torch.eye(3).unsqueeze(0).unsqueeze(0).unsqueeze(0).repeat(1, 1, pad_length, 1, 1),
+                    ego_history_rot
+                ], dim=2)
         else:
             # Use zeros if no history available
             ego_history_xyz = torch.zeros(1, 1, 16, 3)
-            ego_history_rot = torch.eye(3).unsqueeze(0).unsqueeze(0).repeat(1, 1, 16, 1, 1)
+            ego_history_rot = torch.eye(3).unsqueeze(0).unsqueeze(0).unsqueeze(0).repeat(1, 1, 16, 1, 1)
 
-        return {
-            "image_frames": images,
-            "camera_indices": torch.tensor(camera_indices),
+        # Prepare model inputs
+        model_inputs = {
+            "tokenized_data": tokenized_inputs,
             "ego_history_xyz": ego_history_xyz,
             "ego_history_rot": ego_history_rot,
         }
+
+        # Move all tensors to CUDA
+        model_inputs = helper.to_device(model_inputs, "cuda")
+
+        return model_inputs
 
     def _extract_trajectory(self, outputs: Any) -> np.ndarray:
         """Extract trajectory from model outputs.

@@ -254,6 +254,61 @@ pedestrians, controllers = sim.spawn_pedestrian_npcs(
 )
 ```
 
+## Rerun Visualization
+
+### Basic Usage
+
+```bash
+# Enable Rerun visualization (auto-spawns viewer)
+python -m alpamayo_r1.carla.autonomous_scenario --use-rerun
+```
+
+### Alternative Connection Methods
+
+If the viewer doesn't auto-spawn (e.g., on remote servers without display):
+
+#### Option 1: Connect to Existing Viewer
+
+```bash
+# Terminal 1: Start Rerun viewer
+rerun
+
+# Terminal 2: Run simulation (viewer will connect automatically)
+python -m alpamayo_r1.carla.autonomous_scenario --use-rerun
+```
+
+#### Option 2: Save to File
+
+Modify `controller.py` to save recording to file:
+
+```python
+# In _init_rerun() method, replace rr.spawn() with:
+rr.save("alpamayo_carla.rrd")
+```
+
+Then view the recording later:
+
+```bash
+rerun alpamayo_carla.rrd
+```
+
+#### Option 3: Web Server (Remote Access)
+
+Modify `controller.py` to serve via web:
+
+```python
+# In _init_rerun() method, replace rr.spawn() with:
+rr.serve(open_browser=False)
+```
+
+Then access via browser at `http://localhost:9090`
+
+### Troubleshooting Rerun
+
+- **"Cannot spawn viewer"**: Check if display server is available (X11, Wayland)
+- **Remote server**: Use SSH with X11 forwarding (`ssh -X`) or use Option 1/2/3 above
+- **No display**: Use `rr.save()` to record and view locally later
+
 ## Troubleshooting
 
 ### Cannot Connect to CARLA Server
