@@ -5,8 +5,10 @@ This directory contains code for integrating the Alpamayo R1 model with the CARL
 ## Overview
 
 - **inference.py**: Main CARLA simulation class
-- **scenario.py**: Base scenario class
+- **scenario.py**: Base scenario class with Alpamayo controller support
+- **controller.py**: Alpamayo R1 model-based controller for autonomous driving
 - **example_scenario.py**: Example scenario implementation
+- **autonomous_scenario.py**: Autonomous driving scenario using Alpamayo controller
 - **run_inference.py**: Inference script using Alpamayo R1 model
 
 ## Camera Configuration
@@ -31,6 +33,10 @@ The system mimics the 7-camera configuration from the NVIDIA PhysicalAI-Autonomo
 ```bash
 uv sync --group carla
 ```
+
+This installs:
+- `carla>=0.9.15` - CARLA Python API
+- `rerun-sdk>=0.20.0` - 3D visualization (optional, for debugging)
 
 ## Basic Usage
 
@@ -134,6 +140,10 @@ with CARLASimulation(host="localhost", port=2000) as sim:
         config={"key": "value"},
         host=sim.host,
         port=sim.port,
+        model=model,  # Optional: Alpamayo R1 model
+        processor=processor,  # Optional: model processor
+        use_alpamayo_control=True,  # Enable autonomous control
+        use_rerun=True,  # Enable visualization
     )
 
     sim.run_scenario(scenario, num_steps=1000)
@@ -193,6 +203,80 @@ python -m alpamayo_r1.carla.run_inference \
 - `--num-steps`: Number of simulation steps (default: 2000)
 - `--spawn-point`: Spawn point index for ego vehicle (default: 0)
 - `--model-path`: Path to Alpamayo R1 model checkpoint (optional)
+
+## Alpamayo Controller
+
+The `AlpamayoController` class provides model-based autonomous control for the ego vehicle:
+
+```python
+from alpamayo_r1.carla import CARLASimulation, AlpamayoController
+
+with CARLASimulation(host="localhost", port=2000) as sim:
+    # Spawn ego vehicle
+    sim.spawn_ego_vehicle()
+
+    # Setup cameras
+    sim.setup_cameras()
+
+    # Create Alpamayo controller
+    controller = AlpamayoController(
+        ego_vehicle=sim.ego_vehicle,
+        cameras=sim.cameras,
+        model=model,  # Your loaded Alpamayo R1 model
+        processor=processor,
+        use_rerun=True,  # Enable visualization
+        control_frequency=10.0,  # 10 Hz control updates
+    )
+
+    # Simulation loop
+    for step in range(1000):
+        snapshot = sim.world.tick()
+        images = sim.get_camera_images()
+
+        # Update controller (runs inference and applies control)
+        controller.update(snapshot, images)
+```
+
+### Controller Features
+
+- **Model Inference**: Processes camera images with Alpamayo R1 model
+- **Trajectory Prediction**: Extracts predicted trajectories from model outputs
+- **Vehicle Control**: Applies steering, throttle, and brake based on predictions
+- **State Tracking**: Maintains ego vehicle position and rotation history
+- **Rerun Visualization**: Optional 3D visualization of trajectories and camera views
+
+### Running Autonomous Scenario
+
+```bash
+# Basic autonomous driving
+python -m alpamayo_r1.carla.autonomous_scenario
+
+# With Rerun visualization
+python -m alpamayo_r1.carla.autonomous_scenario --use-rerun
+
+# Remote server with custom parameters
+python -m alpamayo_r1.carla.autonomous_scenario \
+    --host 192.168.1.100 \
+    --port 2000 \
+    --map Town05 \
+    --num-vehicles 100 \
+    --num-pedestrians 50 \
+    --target-speed 8.0 \
+    --use-rerun
+```
+
+### Autonomous Scenario Arguments
+
+- `--host`: CARLA server host (default: localhost)
+- `--port`: CARLA server port (default: 2000)
+- `--map`: Map to load (default: Town01)
+- `--num-vehicles`: Number of vehicle NPCs (default: 50)
+- `--num-pedestrians`: Number of pedestrian NPCs (default: 30)
+- `--num-steps`: Simulation steps (default: 2000)
+- `--spawn-point`: Ego vehicle spawn point index (default: 0)
+- `--model-path`: Path to Alpamayo R1 checkpoint (optional)
+- `--use-rerun`: Enable Rerun visualization
+- `--target-speed`: Target speed in m/s (default: 5.0)
 
 ## NPC Control
 

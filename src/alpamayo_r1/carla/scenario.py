@@ -3,6 +3,8 @@
 from abc import ABC, abstractmethod
 from typing import Any
 
+from .controller import AlpamayoController
+
 
 class BaseScenario(ABC):
     """Base class for CARLA simulation scenarios.
@@ -17,6 +19,7 @@ class BaseScenario(ABC):
         traffic_manager: CARLA TrafficManager instance
         ego_vehicle: The ego vehicle actor
         config: Scenario configuration dictionary
+        alpamayo_controller: Optional AlpamayoController for model-based control
     """
 
     def __init__(
@@ -27,6 +30,10 @@ class BaseScenario(ABC):
         config: dict | None = None,
         host: str = "localhost",
         port: int = 2000,
+        model: Any = None,
+        processor: Any = None,
+        use_alpamayo_control: bool = False,
+        use_rerun: bool = False,
     ):
         """Initialize the scenario.
 
@@ -37,6 +44,10 @@ class BaseScenario(ABC):
             config: Optional configuration dictionary for scenario parameters
             host: CARLA server host address (for reference/logging)
             port: CARLA server port (for reference/logging)
+            model: Optional Alpamayo R1 model for autonomous control
+            processor: Optional model processor/tokenizer
+            use_alpamayo_control: Whether to use Alpamayo model for ego vehicle control
+            use_rerun: Whether to enable Rerun visualization
         """
         self.world = world
         self.client = client
@@ -45,6 +56,13 @@ class BaseScenario(ABC):
         self.config = config or {}
         self.host = host
         self.port = port
+
+        # Alpamayo controller (initialized after ego vehicle is spawned)
+        self.model = model
+        self.processor = processor
+        self.use_alpamayo_control = use_alpamayo_control
+        self.use_rerun = use_rerun
+        self.alpamayo_controller = None
 
         # Lists to track spawned actors for cleanup
         self.vehicle_npcs = []
@@ -82,6 +100,35 @@ class BaseScenario(ABC):
             CARLA Transform object for the ego vehicle spawn point
         """
         pass
+
+    def initialize_alpamayo_controller(self, cameras: dict[str, Any]) -> None:
+        """Initialize Alpamayo controller after ego vehicle and cameras are ready.
+
+        Args:
+            cameras: Dictionary mapping camera names to camera actors
+        """
+        if self.use_alpamayo_control and self.ego_vehicle is not None:
+            self.alpamayo_controller = AlpamayoController(
+                ego_vehicle=self.ego_vehicle,
+                cameras=cameras,
+                model=self.model,
+                processor=self.processor,
+                use_rerun=self.use_rerun,
+                control_frequency=10.0,
+            )
+            print("Alpamayo controller initialized")
+
+    def update_controller(
+        self, world_snapshot: Any, camera_images: dict[str, Any]
+    ) -> None:
+        """Update Alpamayo controller if enabled.
+
+        Args:
+            world_snapshot: CARLA world snapshot
+            camera_images: Dictionary mapping camera names to images
+        """
+        if self.alpamayo_controller is not None:
+            self.alpamayo_controller.update(world_snapshot, camera_images)
 
     def run(self) -> None:
         """Run the scenario.

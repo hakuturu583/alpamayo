@@ -391,21 +391,25 @@ class CARLASimulation:
             print(f"Setting up scenario: {scenario.__class__.__name__}")
             scenario.setup()
 
+            # Initialize Alpamayo controller if model-based control is enabled
+            if scenario.use_alpamayo_control:
+                print("Initializing Alpamayo controller...")
+                scenario.initialize_alpamayo_controller(self.cameras)
+
             print("Spawning NPCs...")
             scenario.spawn_npcs()
 
             print(f"Running scenario for {num_steps} steps...")
             for step in range(num_steps):
                 # Tick the world
-                self.world.tick()
+                snapshot = self.world.tick()
 
                 # Get camera images
                 images = self.get_camera_images()
 
-                # Here you can:
-                # 1. Process images with Alpamayo R1 model
-                # 2. Get predicted trajectory
-                # 3. Apply control to ego vehicle
+                # Update Alpamayo controller if enabled
+                if scenario.use_alpamayo_control:
+                    scenario.update_controller(snapshot, images)
 
                 if step % 100 == 0:
                     print(f"Step {step}/{num_steps}")
