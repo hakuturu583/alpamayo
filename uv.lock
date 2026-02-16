@@ -43,6 +43,7 @@ dependencies = [
 carla = [
     { name = "carla" },
     { name = "rerun-sdk" },
+    { name = "tqdm" },
 ]
 dev = [
     { name = "ipykernel" },
@@ -71,6 +72,7 @@ requires-dist = [
 carla = [
     { name = "carla", specifier = ">=0.9.15" },
     { name = "rerun-sdk", specifier = ">=0.20.0" },
+    { name = "tqdm", specifier = ">=4.67.1" },
 ]
 dev = [
     { name = "ipykernel", specifier = ">=6.29.3" },
