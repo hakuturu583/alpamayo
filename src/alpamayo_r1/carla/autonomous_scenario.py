@@ -15,7 +15,6 @@ class AutonomousDrivingScenario(BaseScenario):
     - Ego vehicle controlled by Alpamayo R1 model
     - Vehicle NPCs controlled by TrafficManager
     - Pedestrian NPCs with AI walker controllers
-    - Optional Rerun visualization of predictions and trajectories
     """
 
     def setup(self) -> None:
@@ -101,11 +100,6 @@ def main():
         help="Disable model loading and use rule-based controller only",
     )
     parser.add_argument(
-        "--use-rerun",
-        action="store_true",
-        help="Enable Rerun visualization",
-    )
-    parser.add_argument(
         "--target-speed",
         type=float,
         default=5.0,
@@ -121,7 +115,6 @@ def main():
     print(f"  Pedestrian NPCs: {args.num_pedestrians}")
     print(f"  Simulation steps: {args.num_steps}")
     print(f"  Target speed: {args.target_speed} m/s ({args.target_speed * 3.6:.1f} km/h)")
-    print(f"  Rerun visualization: {args.use_rerun}")
 
     # Load model unless --no-model is specified
     model = None
@@ -216,7 +209,6 @@ def main():
             model=model,
             processor=processor,
             use_alpamayo_control=True,  # Enable Alpamayo controller
-            use_rerun=args.use_rerun,
         )
 
         # Set target speed if controller is initialized

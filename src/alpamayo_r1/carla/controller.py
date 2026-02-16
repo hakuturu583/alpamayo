@@ -29,7 +29,6 @@ class AlpamayoController:
         cameras: dict[str, carla.Actor],
         model: Any = None,
         processor: Any = None,
-        use_rerun: bool = False,
         control_frequency: float = 10.0,
     ):
         """Initialize Alpamayo controller.
@@ -39,14 +38,12 @@ class AlpamayoController:
             cameras: Dictionary mapping camera names to camera actors
             model: Alpamayo R1 model instance (optional)
             processor: Model processor/tokenizer instance (optional)
-            use_rerun: Whether to enable Rerun visualization
             control_frequency: Control update frequency in Hz (default: 10Hz)
         """
         self.ego_vehicle = ego_vehicle
         self.cameras = cameras
         self.model = model
         self.processor = processor
-        self.use_rerun = use_rerun
         self.control_frequency = control_frequency
 
         # Control parameters
@@ -71,87 +68,6 @@ class AlpamayoController:
             'rot': {},  # Cache by pad_length
         }
 
-        # Initialize Rerun if enabled
-        if self.use_rerun:
-            self._init_rerun()
-
-    def _init_rerun(self) -> None:
-        """Initialize Rerun for visualization."""
-        try:
-            import rerun as rr
-            import rerun.blueprint as rrb
-
-            print("Initializing Rerun visualization...")
-
-            # Initialize Rerun recording
-            rr.init("alpamayo_carla", spawn=False)
-
-            # Save to file instead of spawning viewer
-            print("Saving Rerun recording to file: alpamayo_carla.rrd")
-            rr.save("alpamayo_carla.rrd")
-
-            # Set up coordinate system
-            rr.log(
-                "world",
-                rr.ViewCoordinates.RIGHT_HAND_Y_DOWN,
-                static=True,
-            )
-
-            # Initialize timeline to avoid "Waiting for timeline" issue
-            rr.set_time("simulation_time", timestamp=0.0)
-
-            # Define explicit blueprint layout with only used cameras
-            blueprint = rrb.Blueprint(
-                rrb.Horizontal(
-                    rrb.Spatial3DView(
-                        name="3D View",
-                        origin="world",
-                    ),
-                    rrb.Vertical(
-                        rrb.Spatial2DView(
-                            name="Front Wide (120°)",
-                            origin="cameras/camera_front_wide_120fov",
-                        ),
-                        rrb.Spatial2DView(
-                            name="Front Tele (30°)",
-                            origin="cameras/camera_front_tele_30fov",
-                        ),
-                        column_shares=[1, 1],
-                    ),
-                    rrb.Vertical(
-                        rrb.Spatial2DView(
-                            name="Cross Left (120°)",
-                            origin="cameras/camera_cross_left_120fov",
-                        ),
-                        rrb.Spatial2DView(
-                            name="Cross Right (120°)",
-                            origin="cameras/camera_cross_right_120fov",
-                        ),
-                        column_shares=[1, 1],
-                    ),
-                    column_shares=[2, 1, 1],
-                ),
-                collapse_panels=True,
-            )
-
-            # Send blueprint to define the layout
-            rr.send_blueprint(blueprint)
-
-            print("Rerun visualization initialized (saving to alpamayo_carla.rrd)")
-            print("After simulation completes, view recording with:")
-            print("  rerun alpamayo_carla.rrd")
-
-        except ImportError as e:
-            print(f"Warning: rerun-sdk not installed - {e}")
-            print("Install with: pip install rerun-sdk")
-            self.use_rerun = False
-        except Exception as e:
-            print(f"Error initializing Rerun: {e}")
-            print(f"Error type: {type(e).__name__}")
-            import traceback
-            traceback.print_exc()
-            self.use_rerun = False
-
     def update(self, world_snapshot: Any, camera_images: dict[str, np.ndarray]) -> None:
         """Update controller state and compute control commands.
 
@@ -175,10 +91,6 @@ class AlpamayoController:
         # Apply control EVERY frame (using latest prediction from model)
         # This allows smooth control at simulation rate (20Hz) while inference runs at 10Hz
         self._apply_control()
-
-        # Update visualization
-        if self.use_rerun:
-            self._update_rerun()
 
     def _update_ego_state(self) -> None:
         """Update ego vehicle state history."""
@@ -459,60 +371,6 @@ class AlpamayoController:
         control.brake = 0.0
 
         self.ego_vehicle.apply_control(control)
-
-    def _update_rerun(self) -> None:
-        """Update Rerun visualization."""
-        try:
-            import rerun as rr
-
-            # Set timeline to CARLA simulation time
-            if self.world_snapshot is not None:
-                sim_time = self.world_snapshot.timestamp.elapsed_seconds
-                rr.set_time("simulation_time", timestamp=sim_time)
-
-            # Log ego vehicle position
-            if len(self.ego_history_xyz) > 0:
-                current_pos = self.ego_history_xyz[-1]
-                rr.log(
-                    "world/ego_vehicle",
-                    rr.Points3D([current_pos], colors=[[0, 255, 0]], radii=[0.5]),
-                )
-
-                # Log ego trajectory history
-                if len(self.ego_history_xyz) > 1:
-                    history_array = np.array(self.ego_history_xyz)
-                    rr.log(
-                        "world/ego_trajectory/history",
-                        rr.LineStrips3D([history_array], colors=[[0, 200, 0]]),
-                    )
-
-            # Log predicted trajectory
-            if self.predicted_trajectory is not None and len(self.predicted_trajectory) > 0:
-                # Transform predicted trajectory to world frame
-                current_xyz = self.ego_history_xyz[-1]
-                current_rot = spt.Rotation.from_matrix(self.ego_history_rot[-1])
-
-                # Transform local predictions to world coordinates
-                pred_world = current_rot.apply(self.predicted_trajectory[:, :3]) + current_xyz
-
-                rr.log(
-                    "world/ego_trajectory/prediction",
-                    rr.LineStrips3D([pred_world], colors=[[255, 0, 0]]),
-                )
-
-            # Log camera images (only those used for inference)
-            used_cameras = [
-                "camera_cross_left_120fov",
-                "camera_front_wide_120fov",
-                "camera_cross_right_120fov",
-                "camera_front_tele_30fov",
-            ]
-            for cam_name, image in self.current_images.items():
-                if cam_name in used_cameras:
-                    rr.log(f"cameras/{cam_name}", rr.Image(image))
-
-        except Exception as e:
-            print(f"Rerun visualization update failed: {e}")
 
     def set_target_speed(self, speed: float) -> None:
         """Set target speed for the controller.

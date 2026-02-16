@@ -30,7 +30,6 @@ dev = [
 ]
 carla = [
   "carla>=0.9.15",
-  "rerun-sdk>=0.20.0",
   "tqdm>=4.67.1",
 ]
 

@@ -34,7 +34,6 @@ uv sync --group carla
 
 This installs:
 - `carla>=0.9.15` - CARLA Python API
-- `rerun-sdk>=0.20.0` - 3D visualization (optional, for debugging)
 
 ## Basic Usage
 
@@ -141,7 +140,6 @@ with CARLASimulation(host="localhost", port=2000) as sim:
         model=model,  # Optional: Alpamayo R1 model
         processor=processor,  # Optional: model processor
         use_alpamayo_control=True,  # Enable autonomous control
-        use_rerun=True,  # Enable visualization
     )
 
     sim.run_scenario(scenario, num_steps=1000)
@@ -167,7 +165,6 @@ with CARLASimulation(host="localhost", port=2000) as sim:
         cameras=sim.cameras,
         model=model,  # Your loaded Alpamayo R1 model
         processor=processor,
-        use_rerun=True,  # Enable visualization
         control_frequency=10.0,  # 10 Hz control updates
     )
 
@@ -186,7 +183,6 @@ with CARLASimulation(host="localhost", port=2000) as sim:
 - **Trajectory Prediction**: Extracts predicted trajectories from model outputs
 - **Vehicle Control**: Applies steering, throttle, and brake based on predictions
 - **State Tracking**: Maintains ego vehicle position and rotation history
-- **Rerun Visualization**: Optional 3D visualization of trajectories and camera views
 
 ### Running Autonomous Scenario
 
@@ -197,9 +193,6 @@ python -m alpamayo_r1.carla.autonomous_scenario
 # Without model (rule-based controller only)
 python -m alpamayo_r1.carla.autonomous_scenario --no-model
 
-# With Rerun visualization
-python -m alpamayo_r1.carla.autonomous_scenario --use-rerun
-
 # Remote server with custom parameters
 python -m alpamayo_r1.carla.autonomous_scenario \
     --host 192.168.1.100 \
@@ -207,8 +200,7 @@ python -m alpamayo_r1.carla.autonomous_scenario \
     --map Town05 \
     --num-vehicles 100 \
     --num-pedestrians 50 \
-    --target-speed 8.0 \
-    --use-rerun
+    --target-speed 8.0
 ```
 
 **Note**:
@@ -227,7 +219,6 @@ python -m alpamayo_r1.carla.autonomous_scenario \
 - `--num-steps`: Simulation steps (default: 2000)
 - `--spawn-point`: Ego vehicle spawn point index (default: 0)
 - `--no-model`: Disable model loading (use rule-based controller)
-- `--use-rerun`: Enable Rerun visualization
 - `--target-speed`: Target speed in m/s (default: 5.0)
 
 ## NPC Control
@@ -253,61 +244,6 @@ pedestrians, controllers = sim.spawn_pedestrian_npcs(
     spawn_radius=50.0     # Spawn radius from ego vehicle
 )
 ```
-
-## Rerun Visualization
-
-### Basic Usage
-
-```bash
-# Enable Rerun visualization (auto-spawns viewer)
-python -m alpamayo_r1.carla.autonomous_scenario --use-rerun
-```
-
-### Alternative Connection Methods
-
-If the viewer doesn't auto-spawn (e.g., on remote servers without display):
-
-#### Option 1: Connect to Existing Viewer
-
-```bash
-# Terminal 1: Start Rerun viewer
-rerun
-
-# Terminal 2: Run simulation (viewer will connect automatically)
-python -m alpamayo_r1.carla.autonomous_scenario --use-rerun
-```
-
-#### Option 2: Save to File
-
-Modify `controller.py` to save recording to file:
-
-```python
-# In _init_rerun() method, replace rr.spawn() with:
-rr.save("alpamayo_carla.rrd")
-```
-
-Then view the recording later:
-
-```bash
-rerun alpamayo_carla.rrd
-```
-
-#### Option 3: Web Server (Remote Access)
-
-Modify `controller.py` to serve via web:
-
-```python
-# In _init_rerun() method, replace rr.spawn() with:
-rr.serve(open_browser=False)
-```
-
-Then access via browser at `http://localhost:9090`
-
-### Troubleshooting Rerun
-
-- **"Cannot spawn viewer"**: Check if display server is available (X11, Wayland)
-- **Remote server**: Use SSH with X11 forwarding (`ssh -X`) or use Option 1/2/3 above
-- **No display**: Use `rr.save()` to record and view locally later
 
 ## Troubleshooting
 

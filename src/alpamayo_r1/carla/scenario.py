@@ -33,7 +33,6 @@ class BaseScenario(ABC):
         model: Any = None,
         processor: Any = None,
         use_alpamayo_control: bool = False,
-        use_rerun: bool = False,
     ):
         """Initialize the scenario.
 
@@ -47,7 +46,6 @@ class BaseScenario(ABC):
             model: Optional Alpamayo R1 model for autonomous control
             processor: Optional model processor/tokenizer
             use_alpamayo_control: Whether to use Alpamayo model for ego vehicle control
-            use_rerun: Whether to enable Rerun visualization
         """
         self.world = world
         self.client = client
@@ -61,7 +59,6 @@ class BaseScenario(ABC):
         self.model = model
         self.processor = processor
         self.use_alpamayo_control = use_alpamayo_control
-        self.use_rerun = use_rerun
         self.alpamayo_controller = None
 
         # Lists to track spawned actors for cleanup
@@ -116,7 +113,6 @@ class BaseScenario(ABC):
                 cameras=cameras,
                 model=self.model,
                 processor=self.processor,
-                use_rerun=self.use_rerun,
                 control_frequency=10.0,
             )
             print("Alpamayo controller initialized")
