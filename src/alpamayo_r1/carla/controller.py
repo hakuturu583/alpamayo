@@ -234,7 +234,9 @@ class AlpamayoController:
         points_2d, valid_mask = self._project_trajectory_to_image(trajectory_local)
 
         if points_2d.shape[0] == 0:
-            return image
+            # Add HUD even if no trajectory
+            img_with_hud = self._add_hud_overlay(img_bgr)
+            return cv2.cvtColor(img_with_hud, cv2.COLOR_BGR2RGB)
 
         # Draw trajectory as connected line segments
         prev_point = None
@@ -247,22 +249,71 @@ class AlpamayoController:
 
             # Check if point is within image bounds
             if 0 <= u < self.image_width and 0 <= v < self.image_height:
-                # Draw point
-                cv2.circle(img_bgr, (u, v), 3, (0, 255, 0), -1)  # Green circle
+                # Draw point with thicker circle for better visibility
+                cv2.circle(img_bgr, (u, v), 5, (0, 255, 0), -1)  # Green circle
 
-                # Draw line from previous point
+                # Draw line from previous point with thicker line
                 if prev_point is not None:
                     prev_u, prev_v = int(prev_point[0]), int(prev_point[1])
                     if 0 <= prev_u < self.image_width and 0 <= prev_v < self.image_height:
-                        cv2.line(img_bgr, (prev_u, prev_v), (u, v), (0, 255, 0), 2)  # Green line
+                        cv2.line(img_bgr, (prev_u, prev_v), (u, v), (0, 255, 0), 4)  # Thicker green line
 
                 prev_point = point
             else:
                 prev_point = None
 
+        # Add HUD overlay with vehicle info
+        img_with_hud = self._add_hud_overlay(img_bgr)
+
         # Convert back to RGB
-        img_rgb = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2RGB)
+        img_rgb = cv2.cvtColor(img_with_hud, cv2.COLOR_BGR2RGB)
         return img_rgb
+
+    def _add_hud_overlay(self, image_bgr: np.ndarray) -> np.ndarray:
+        """Add HUD overlay with vehicle information.
+
+        Args:
+            image_bgr: Image in BGR format
+
+        Returns:
+            Image with HUD overlay in BGR format
+        """
+        # Get current vehicle state
+        velocity = self.ego_vehicle.get_velocity()
+        speed = np.sqrt(velocity.x**2 + velocity.y**2 + velocity.z**2)
+        location = self.ego_vehicle.get_transform().location
+
+        # Create semi-transparent overlay for HUD
+        overlay = image_bgr.copy()
+
+        # Draw background rectangle for HUD (top-left corner)
+        cv2.rectangle(overlay, (10, 10), (450, 150), (0, 0, 0), -1)
+        cv2.addWeighted(overlay, 0.4, image_bgr, 0.6, 0, image_bgr)
+
+        # Font settings
+        font = cv2.FONT_HERSHEY_SIMPLEX
+        font_scale = 0.6
+        font_thickness = 2
+        line_height = 30
+
+        # Draw HUD text
+        y_offset = 35
+        cv2.putText(image_bgr, f"Step: {self.step_count}", (20, y_offset),
+                    font, font_scale, (0, 255, 255), font_thickness)
+
+        y_offset += line_height
+        cv2.putText(image_bgr, f"Speed: {speed:.1f} m/s ({speed*3.6:.1f} km/h)",
+                    (20, y_offset), font, font_scale, (0, 255, 255), font_thickness)
+
+        y_offset += line_height
+        cv2.putText(image_bgr, f"Position: ({location.x:.1f}, {location.y:.1f})",
+                    (20, y_offset), font, font_scale, (0, 255, 255), font_thickness)
+
+        y_offset += line_height
+        cv2.putText(image_bgr, f"Target Speed: {self.target_speed:.1f} m/s",
+                    (20, y_offset), font, font_scale, (0, 255, 255), font_thickness)
+
+        return image_bgr
 
     def update(self, world_snapshot: Any, camera_images: dict[str, np.ndarray]) -> None:
         """Update controller state and compute control commands.
