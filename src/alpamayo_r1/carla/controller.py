@@ -183,7 +183,7 @@ class AlpamayoController:
                     top_p=0.98,
                     temperature=0.6,
                     num_traj_samples=1,
-                    max_generation_length=256,  # Reduced from 256 to 8 for maximum VRAM savings
+                    max_generation_length=128,  # Reduced from 256 to 128 for VRAM savings
                     return_extra=True,
                 )
 
@@ -250,10 +250,10 @@ class AlpamayoController:
         image_list = []
         for cam_name, image in sorted_cameras:
             # Downscale images to reduce VRAM usage
-            # 1920x1080 -> 240x135 (1/8 scale for maximum VRAM reduction)
-            # Further reduced from 320x180 to save more VRAM
+            # 1920x1080 -> 160x90 (1/12 scale for maximum VRAM reduction)
+            # Aggressively reduced to minimize memory footprint
             image_pil = Image.fromarray(image)
-            image_resized = image_pil.resize((240, 135), Image.LANCZOS)
+            image_resized = image_pil.resize((160, 90), Image.LANCZOS)
             image_resized = np.array(image_resized)
 
             # Convert to tensor (H, W, C) -> (C, H, W)

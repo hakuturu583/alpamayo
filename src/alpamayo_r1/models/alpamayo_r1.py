@@ -89,6 +89,10 @@ class AlpamayoR1(ReasoningVLA):
         if config.expert_cfg is not None:
             for key, value in config.expert_cfg.items():
                 setattr(expert_config, key, value)
+        # Disable Flash Attention 2 for expert model to avoid shape mismatch errors
+        # Expert model uses custom attention masks that are incompatible with flash_attn
+        if hasattr(expert_config, '_attn_implementation'):
+            expert_config._attn_implementation = 'sdpa'  # Use PyTorch SDPA instead
         self.expert = AutoModel.from_config(expert_config)
         # we don't need the embed_tokens of the expert model
         del self.expert.embed_tokens
