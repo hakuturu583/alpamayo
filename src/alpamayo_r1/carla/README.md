@@ -248,11 +248,17 @@ with CARLASimulation(host="localhost", port=2000) as sim:
 ### Running Autonomous Scenario
 
 ```bash
-# Basic autonomous driving
+# Basic autonomous driving (rule-based controller)
 python -m alpamayo_r1.carla.autonomous_scenario
 
+# With Alpamayo R1 model
+python -m alpamayo_r1.carla.autonomous_scenario \
+    --model-path /path/to/alpamayo_r1_model
+
 # With Rerun visualization
-python -m alpamayo_r1.carla.autonomous_scenario --use-rerun
+python -m alpamayo_r1.carla.autonomous_scenario \
+    --model-path /path/to/alpamayo_r1_model \
+    --use-rerun
 
 # Remote server with custom parameters
 python -m alpamayo_r1.carla.autonomous_scenario \
@@ -262,8 +268,14 @@ python -m alpamayo_r1.carla.autonomous_scenario \
     --num-vehicles 100 \
     --num-pedestrians 50 \
     --target-speed 8.0 \
+    --model-path /path/to/alpamayo_r1_model \
     --use-rerun
 ```
+
+**Note**: The Alpamayo R1 model will be loaded at scenario setup time with:
+- `torch_dtype=torch.bfloat16` for efficiency
+- `device_map="auto"` for automatic GPU selection
+- Model is set to eval mode automatically
 
 ### Autonomous Scenario Arguments
 

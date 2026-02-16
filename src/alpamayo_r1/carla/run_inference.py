@@ -259,13 +259,32 @@ def main():
     model = None
     processor = None
     if args.model_path:
-        print(f"Loading model from {args.model_path}")
-        # TODO: Implement model loading
-        # from transformers import AutoModelForCausalLM, AutoProcessor
-        # model = AutoModelForCausalLM.from_pretrained(args.model_path)
-        # processor = AutoProcessor.from_pretrained(args.model_path)
-        # model.eval()
-        print("Model loading not yet implemented")
+        print(f"Loading Alpamayo R1 model from {args.model_path}")
+        try:
+            import torch
+            from transformers import AutoModelForCausalLM, AutoProcessor
+
+            print("Loading processor...")
+            processor = AutoProcessor.from_pretrained(args.model_path)
+
+            print("Loading model...")
+            model = AutoModelForCausalLM.from_pretrained(
+                args.model_path,
+                torch_dtype=torch.bfloat16,
+                device_map="auto",
+            )
+            model.eval()
+
+            print(f"Model loaded successfully on device: {model.device}")
+            print(f"Model dtype: {model.dtype}")
+
+        except Exception as e:
+            print(f"Failed to load model: {e}")
+            print("Continuing without model")
+            model = None
+            processor = None
+    else:
+        print("No model path provided - running without model inference")
 
     # Create simulation
     with CARLASimulation(host=args.host, port=args.port, map_name=args.map) as sim:
