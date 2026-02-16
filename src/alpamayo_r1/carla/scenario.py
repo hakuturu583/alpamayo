@@ -360,6 +360,7 @@ class BaseScenario(ABC):
         """
         import carla
         import numpy as np
+        import time
 
         if self.ego_vehicle is None:
             print("Warning: Ego vehicle must be spawned before pedestrians")
@@ -371,49 +372,97 @@ class BaseScenario(ABC):
 
         ego_location = self.ego_vehicle.get_location()
 
-        # Spawn pedestrians
-        for _ in range(num_pedestrians):
+        print(f"Spawning {num_pedestrians} pedestrians...")
+
+        # Spawn pedestrians with safety checks
+        spawn_batch = []
+        for i in range(num_pedestrians):
             spawn_transform = carla.Transform()
             spawn_transform.location = carla.Location(
                 x=ego_location.x + np.random.uniform(-spawn_radius, spawn_radius),
                 y=ego_location.y + np.random.uniform(-spawn_radius, spawn_radius),
-                z=ego_location.z + 0.5,
+                z=ego_location.z + 1.0,  # Slightly higher to avoid ground collision
             )
 
             walker_bp = np.random.choice(walker_bps)
 
             try:
-                pedestrian = self.world.spawn_actor(walker_bp, spawn_transform)
-                self.pedestrian_npcs.append(pedestrian)
-            except RuntimeError:
+                pedestrian = self.world.try_spawn_actor(walker_bp, spawn_transform)
+                if pedestrian is not None:
+                    self.pedestrian_npcs.append(pedestrian)
+                    spawn_batch.append(pedestrian)
+
+                    # Tick every few spawns to help CARLA process
+                    if (i + 1) % 5 == 0:
+                        self.world.tick()
+
+            except Exception as e:
+                print(f"Failed to spawn pedestrian {i}: {e}")
                 continue
 
-        # Wait for pedestrians to be registered
+        # Final tick to register all pedestrians
         self.world.tick()
+        time.sleep(0.1)  # Small delay for stability
 
-        # Spawn controllers
-        for pedestrian in self.pedestrian_npcs:
+        if len(self.pedestrian_npcs) == 0:
+            print("No pedestrians spawned")
+            return [], []
+
+        print(f"Spawned {len(self.pedestrian_npcs)} pedestrians, creating controllers...")
+
+        # Spawn controllers with safety checks
+        for i, pedestrian in enumerate(self.pedestrian_npcs):
             try:
-                controller = self.world.spawn_actor(
+                if pedestrian is None or not pedestrian.is_alive:
+                    continue
+
+                controller = self.world.try_spawn_actor(
                     controller_bp, carla.Transform(), pedestrian
                 )
-                self.pedestrian_controllers.append(controller)
-            except RuntimeError:
+                if controller is not None:
+                    self.pedestrian_controllers.append(controller)
+
+                    # Tick every few spawns
+                    if (i + 1) % 5 == 0:
+                        self.world.tick()
+
+            except Exception as e:
+                print(f"Failed to spawn controller for pedestrian {i}: {e}")
                 continue
 
-        # Wait for controllers to be registered
+        # Final tick to register all controllers
+        self.world.tick()
+        time.sleep(0.1)  # Small delay for stability
+
+        print(f"Created {len(self.pedestrian_controllers)} controllers, starting AI...")
+
+        # Start walking behavior with safety checks
+        for i, controller in enumerate(self.pedestrian_controllers):
+            try:
+                if controller is None or not controller.is_alive:
+                    continue
+
+                controller.start()
+
+                # Set random destination
+                destination = carla.Location(
+                    x=ego_location.x + np.random.uniform(-spawn_radius, spawn_radius),
+                    y=ego_location.y + np.random.uniform(-spawn_radius, spawn_radius),
+                    z=ego_location.z,
+                )
+                controller.go_to_location(destination)
+                controller.set_max_speed(float(np.random.uniform(1.0, 2.0)))
+
+                # Small tick every few starts
+                if (i + 1) % 5 == 0:
+                    self.world.tick()
+
+            except Exception as e:
+                print(f"Failed to start controller {i}: {e}")
+                continue
+
+        # Final tick
         self.world.tick()
 
-        # Start walking behavior
-        for controller in self.pedestrian_controllers:
-            controller.start()
-            destination = carla.Location(
-                x=ego_location.x + np.random.uniform(-spawn_radius, spawn_radius),
-                y=ego_location.y + np.random.uniform(-spawn_radius, spawn_radius),
-                z=ego_location.z,
-            )
-            controller.go_to_location(destination)
-            controller.set_max_speed(np.random.uniform(1.0, 2.0))
-
-        print(f"Spawned {len(self.pedestrian_npcs)} pedestrian NPCs")
+        print(f"Successfully spawned {len(self.pedestrian_npcs)} pedestrian NPCs with {len(self.pedestrian_controllers)} controllers")
         return self.pedestrian_npcs, self.pedestrian_controllers
