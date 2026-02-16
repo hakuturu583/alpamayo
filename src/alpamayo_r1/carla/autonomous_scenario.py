@@ -96,12 +96,6 @@ def main():
         help="Spawn point index for ego vehicle",
     )
     parser.add_argument(
-        "--model-path",
-        type=str,
-        default="nvidia/AlpamayoR1",
-        help="Path or HuggingFace model ID for Alpamayo R1 (default: nvidia/AlpamayoR1)",
-    )
-    parser.add_argument(
         "--no-model",
         action="store_true",
         help="Disable model loading and use rule-based controller only",
@@ -133,50 +127,42 @@ def main():
     model = None
     processor = None
     if not args.no_model:
-        print(f"Loading Alpamayo R1 model from {args.model_path}")
+        print("Loading Alpamayo R1 model from nvidia/Alpamayo-R1-10B")
         import torch
-        from transformers import AutoModelForCausalLM, AutoProcessor
+        from alpamayo_r1 import helper
+        from alpamayo_r1.models.alpamayo_r1 import AlpamayoR1
 
         # Check CUDA availability
+        if not torch.cuda.is_available():
+            raise RuntimeError(
+                "CUDA is not available. Alpamayo R1 requires GPU.\n"
+                "Please ensure CUDA is installed and GPU is accessible."
+            )
+
         print(f"CUDA available: {torch.cuda.is_available()}")
-        if torch.cuda.is_available():
-            print(f"CUDA device count: {torch.cuda.device_count()}")
-            print(f"CUDA device name: {torch.cuda.get_device_name(0)}")
-            print(f"CUDA memory: {torch.cuda.get_device_properties(0).total_memory / 1e9:.2f} GB")
-        else:
-            print("WARNING: CUDA not available, model will load on CPU")
+        print(f"CUDA device count: {torch.cuda.device_count()}")
+        print(f"CUDA device name: {torch.cuda.get_device_name(0)}")
+        print(f"CUDA memory: {torch.cuda.get_device_properties(0).total_memory / 1e9:.2f} GB")
 
         try:
-            print("Loading processor...")
-            processor = AutoProcessor.from_pretrained(args.model_path)
-
             print("Loading model...")
-            # Use explicit GPU device if available
-            if torch.cuda.is_available():
-                device_map = "cuda:0"
-                print(f"Loading model to GPU (device_map={device_map})")
-            else:
-                device_map = "auto"
-                print(f"Loading model with device_map=auto (will use CPU)")
+            model = AlpamayoR1.from_pretrained(
+                "nvidia/Alpamayo-R1-10B", dtype=torch.bfloat16
+            ).to("cuda")
 
-            model = AutoModelForCausalLM.from_pretrained(
-                args.model_path,
-                torch_dtype=torch.bfloat16,
-                device_map=device_map,
-            )
-            model.eval()
+            print("Loading processor...")
+            processor = helper.get_processor(model.tokenizer)
 
             print(f"Model loaded successfully!")
-            print(f"Model device: {model.device}")
-            print(f"Model dtype: {model.dtype}")
+            print(f"Model device: {next(model.parameters()).device}")
+            print(f"Model dtype: {next(model.parameters()).dtype}")
 
             # Check model memory usage
-            if torch.cuda.is_available():
-                print(f"GPU memory allocated: {torch.cuda.memory_allocated(0) / 1e9:.2f} GB")
-                print(f"GPU memory reserved: {torch.cuda.memory_reserved(0) / 1e9:.2f} GB")
+            print(f"GPU memory allocated: {torch.cuda.memory_allocated(0) / 1e9:.2f} GB")
+            print(f"GPU memory reserved: {torch.cuda.memory_reserved(0) / 1e9:.2f} GB")
 
         except Exception as e:
-            print(f"\nERROR: Failed to load model from '{args.model_path}'")
+            print(f"\nERROR: Failed to load Alpamayo R1 model")
             print(f"Error message: {e}")
             import traceback
             traceback.print_exc()

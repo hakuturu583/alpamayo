@@ -191,12 +191,8 @@ with CARLASimulation(host="localhost", port=2000) as sim:
 ### Running Autonomous Scenario
 
 ```bash
-# With Alpamayo R1 model from HuggingFace (default)
+# With Alpamayo R1 model (default - requires GPU)
 python -m alpamayo_r1.carla.autonomous_scenario
-
-# With local model checkpoint
-python -m alpamayo_r1.carla.autonomous_scenario \
-    --model-path /path/to/local/checkpoint
 
 # Without model (rule-based controller only)
 python -m alpamayo_r1.carla.autonomous_scenario --no-model
@@ -216,13 +212,10 @@ python -m alpamayo_r1.carla.autonomous_scenario \
 ```
 
 **Note**:
-- By default, the model is loaded from HuggingFace Hub: `nvidia/AlpamayoR1`
-- Model loading uses:
-  - `torch_dtype=torch.bfloat16` for efficiency
-  - `device_map="auto"` for automatic GPU selection
-  - Automatic eval mode
-- Use `--no-model` to disable model loading and use rule-based controller
-- Use `--model-path` to specify a local checkpoint or different HuggingFace model
+- By default, loads `nvidia/Alpamayo-R1-10B` from HuggingFace Hub
+- Model loading uses `AlpamayoR1.from_pretrained()` with `dtype=torch.bfloat16`
+- **Requires CUDA-capable GPU** - will fail if CUDA is not available
+- Use `--no-model` to run with rule-based controller (no GPU required)
 
 ### Autonomous Scenario Arguments
 
@@ -233,7 +226,6 @@ python -m alpamayo_r1.carla.autonomous_scenario \
 - `--num-pedestrians`: Number of pedestrian NPCs (default: 30)
 - `--num-steps`: Simulation steps (default: 2000)
 - `--spawn-point`: Ego vehicle spawn point index (default: 0)
-- `--model-path`: Path or HuggingFace model ID (default: nvidia/AlpamayoR1)
 - `--no-model`: Disable model loading (use rule-based controller)
 - `--use-rerun`: Enable Rerun visualization
 - `--target-speed`: Target speed in m/s (default: 5.0)
