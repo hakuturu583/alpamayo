@@ -358,6 +358,7 @@ class BaseScenario(ABC):
         Returns:
             Tuple of (pedestrian actors, controller actors)
         """
+        import carla
         import numpy as np
 
         if self.ego_vehicle is None:
@@ -372,17 +373,6 @@ class BaseScenario(ABC):
 
         # Spawn pedestrians
         for _ in range(num_pedestrians):
-            spawn_point = self.world.get_blueprint_library().find("controller.ai.walker")
-            spawn_point = type("Transform", (), {})()
-            spawn_point.location = ego_location + type("Location", (), {})(
-                x=np.random.uniform(-spawn_radius, spawn_radius),
-                y=np.random.uniform(-spawn_radius, spawn_radius),
-                z=0.5,
-            )
-
-            # Convert to proper CARLA Transform
-            import carla
-
             spawn_transform = carla.Transform()
             spawn_transform.location = carla.Location(
                 x=ego_location.x + np.random.uniform(-spawn_radius, spawn_radius),
@@ -404,8 +394,6 @@ class BaseScenario(ABC):
         # Spawn controllers
         for pedestrian in self.pedestrian_npcs:
             try:
-                import carla
-
                 controller = self.world.spawn_actor(
                     controller_bp, carla.Transform(), pedestrian
                 )
@@ -418,8 +406,6 @@ class BaseScenario(ABC):
 
         # Start walking behavior
         for controller in self.pedestrian_controllers:
-            import carla
-
             controller.start()
             destination = carla.Location(
                 x=ego_location.x + np.random.uniform(-spawn_radius, spawn_radius),
