@@ -11,6 +11,7 @@ from typing import Any
 
 import carla
 import numpy as np
+from tqdm import tqdm
 
 from .scenario import BaseScenario
 
@@ -378,7 +379,7 @@ class CARLASimulation:
             scenario.spawn_npcs()
 
             print(f"Running scenario for {num_steps} steps...")
-            for step in range(num_steps):
+            for step in tqdm(range(num_steps), desc="Simulation", unit="step"):
                 # Tick the world
                 snapshot = self.world.tick()
 
@@ -388,9 +389,6 @@ class CARLASimulation:
                 # Update Alpamayo controller if enabled
                 if scenario.use_alpamayo_control:
                     scenario.update_controller(snapshot, images)
-
-                if step % 100 == 0:
-                    print(f"Step {step}/{num_steps}")
 
                 # Run scenario-specific logic
                 scenario.run()
