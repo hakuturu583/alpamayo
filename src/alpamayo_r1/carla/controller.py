@@ -452,9 +452,16 @@ class AlpamayoController:
                     rr.LineStrips3D([pred_world], colors=[[255, 0, 0]]),
                 )
 
-            # Log camera images
+            # Log camera images (only those used for inference)
+            used_cameras = [
+                "camera_cross_left_120fov",
+                "camera_front_wide_120fov",
+                "camera_cross_right_120fov",
+                "camera_front_tele_30fov",
+            ]
             for cam_name, image in self.current_images.items():
-                rr.log(f"cameras/{cam_name}", rr.Image(image))
+                if cam_name in used_cameras:
+                    rr.log(f"cameras/{cam_name}", rr.Image(image))
 
         except Exception as e:
             print(f"Rerun visualization update failed: {e}")
