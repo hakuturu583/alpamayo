@@ -83,6 +83,24 @@ class AlpamayoController:
         # Camera parameters for projection
         self._init_camera_params()
 
+        # Initialize vehicle control settings
+        self._init_vehicle_control()
+
+    def _init_vehicle_control(self) -> None:
+        """Initialize vehicle control settings (gear, handbrake, etc.)."""
+        # Create initial control to set up vehicle
+        initial_control = carla.VehicleControl()
+        initial_control.manual_gear_shift = False  # Use automatic transmission
+        initial_control.hand_brake = False  # Release handbrake
+        initial_control.gear = 1  # Set to first gear (forward)
+        initial_control.throttle = 0.0
+        initial_control.steer = 0.0
+        initial_control.brake = 0.0
+
+        # Apply initial control
+        self.ego_vehicle.apply_control(initial_control)
+        print("Vehicle control initialized: automatic transmission, handbrake released")
+
     def _init_video_writer(self) -> None:
         """Initialize video writer for trajectory visualization."""
         # Video parameters (1920x1080 at 20 FPS to match CARLA simulation)
@@ -553,6 +571,8 @@ class AlpamayoController:
 
         # Apply control
         control = carla.VehicleControl()
+        control.manual_gear_shift = False  # Automatic transmission
+        control.hand_brake = False  # Ensure handbrake is off
         control.throttle = float(throttle)
         control.steer = float(steering)
         control.brake = float(brake)
@@ -578,6 +598,8 @@ class AlpamayoController:
         throttle = np.clip(0.5 * speed_error, 0.0, 1.0)
 
         control = carla.VehicleControl()
+        control.manual_gear_shift = False  # Automatic transmission
+        control.hand_brake = False  # Ensure handbrake is off
         control.throttle = float(throttle)
         control.steer = 0.0
         control.brake = 0.0
