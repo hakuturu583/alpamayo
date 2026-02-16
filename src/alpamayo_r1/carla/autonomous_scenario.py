@@ -134,19 +134,19 @@ def main():
     processor = None
     if not args.no_model:
         print(f"Loading Alpamayo R1 model from {args.model_path}")
+        import torch
+        from transformers import AutoModelForCausalLM, AutoProcessor
+
+        # Check CUDA availability
+        print(f"CUDA available: {torch.cuda.is_available()}")
+        if torch.cuda.is_available():
+            print(f"CUDA device count: {torch.cuda.device_count()}")
+            print(f"CUDA device name: {torch.cuda.get_device_name(0)}")
+            print(f"CUDA memory: {torch.cuda.get_device_properties(0).total_memory / 1e9:.2f} GB")
+        else:
+            print("WARNING: CUDA not available, model will load on CPU")
+
         try:
-            import torch
-            from transformers import AutoModelForCausalLM, AutoProcessor
-
-            # Check CUDA availability
-            print(f"CUDA available: {torch.cuda.is_available()}")
-            if torch.cuda.is_available():
-                print(f"CUDA device count: {torch.cuda.device_count()}")
-                print(f"CUDA device name: {torch.cuda.get_device_name(0)}")
-                print(f"CUDA memory: {torch.cuda.get_device_properties(0).total_memory / 1e9:.2f} GB")
-            else:
-                print("WARNING: CUDA not available, model will load on CPU")
-
             print("Loading processor...")
             processor = AutoProcessor.from_pretrained(args.model_path)
 
@@ -176,12 +176,12 @@ def main():
                 print(f"GPU memory reserved: {torch.cuda.memory_reserved(0) / 1e9:.2f} GB")
 
         except Exception as e:
-            print(f"Failed to load model: {e}")
+            print(f"\nERROR: Failed to load model from '{args.model_path}'")
+            print(f"Error message: {e}")
             import traceback
             traceback.print_exc()
-            print("Falling back to rule-based controller")
-            model = None
-            processor = None
+            print("\nTo run without model, use --no-model flag")
+            raise RuntimeError(f"Model loading failed: {e}") from e
     else:
         print("Model loading disabled (--no-model) - using rule-based controller")
 
