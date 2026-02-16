@@ -183,7 +183,7 @@ class AlpamayoController:
                     top_p=0.98,
                     temperature=0.6,
                     num_traj_samples=1,
-                    max_generation_length=128,  # Reduced from 256 to 128 for VRAM savings
+                    max_generation_length=256,  # Same as test_inference.py
                     return_extra=True,
                 )
 
@@ -249,16 +249,10 @@ class AlpamayoController:
 
         image_list = []
         for cam_name, image in sorted_cameras:
-            # Downscale images to reduce VRAM usage
-            # 1920x1080 -> 160x90 (1/12 scale for maximum VRAM reduction)
-            # Aggressively reduced to minimize memory footprint
-            image_pil = Image.fromarray(image)
-            image_resized = image_pil.resize((160, 90), Image.LANCZOS)
-            image_resized = np.array(image_resized)
-
+            # Use native resolution (same as test_inference.py)
+            # CARLA provides 1920x1080 images
             # Convert to tensor (H, W, C) -> (C, H, W)
-            # Removed .copy() to save memory
-            img_tensor = torch.from_numpy(image_resized).float()
+            img_tensor = torch.from_numpy(image).float()
             img_tensor = rearrange(img_tensor, "h w c -> c h w")
             image_list.append(img_tensor)
 

@@ -157,15 +157,10 @@ def main():
             torch.cuda.empty_cache()
 
             print("Loading model...")
-            print("Configuring Flash Attention 2 for memory efficiency...")
-
-            # Load config and explicitly set attn_implementation for VLM
-            from alpamayo_r1.models.alpamayo_r1 import AlpamayoR1Config
-            config = AlpamayoR1Config.from_pretrained("nvidia/Alpamayo-R1-10B")
-            config.attn_implementation = "flash_attention_2"  # Enable Flash Attention 2 for VLM
-
+            # Use default configuration (same as test_inference.py)
+            # Explicit Flash Attention 2 config was causing VRAM issues
             model = AlpamayoR1.from_pretrained(
-                "nvidia/Alpamayo-R1-10B", config=config, dtype=torch.bfloat16
+                "nvidia/Alpamayo-R1-10B", dtype=torch.bfloat16
             ).to("cuda")
 
             print("Loading processor...")
