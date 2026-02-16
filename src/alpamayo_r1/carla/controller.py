@@ -178,7 +178,8 @@ class AlpamayoController:
 
         for cam_name, image in sorted(self.current_images.items()):
             # Convert to tensor and normalize
-            img_tensor = torch.from_numpy(image).float() / 255.0
+            # Use .copy() to ensure contiguous memory layout (fixes negative stride issue)
+            img_tensor = torch.from_numpy(image.copy()).float() / 255.0
             img_tensor = rearrange(img_tensor, "h w c -> c h w")
             image_list.append(img_tensor)
 
