@@ -381,7 +381,8 @@ class CARLASimulation:
             print(f"Running scenario for {num_steps} steps...")
             for step in tqdm(range(num_steps), desc="Simulation", unit="step"):
                 # Tick the world
-                snapshot = self.world.tick()
+                self.world.tick()
+                snapshot = self.world.get_snapshot()
 
                 # Get camera images
                 images = self.get_camera_images()

@@ -63,6 +63,7 @@ class AlpamayoController:
         # Latest predictions
         self.predicted_trajectory = None
         self.current_images = {}
+        self.world_snapshot = None
 
         # Pre-allocated tensors for padding (VRAM optimization)
         self._cached_padding_tensors = {
@@ -118,6 +119,7 @@ class AlpamayoController:
             camera_images: Dictionary mapping camera names to RGB images (H, W, 3)
         """
         self.step_count += 1
+        self.world_snapshot = world_snapshot
 
         # Update ego state
         self._update_ego_state()
@@ -421,6 +423,11 @@ class AlpamayoController:
         """Update Rerun visualization."""
         try:
             import rerun as rr
+
+            # Set timeline to CARLA simulation time
+            if self.world_snapshot is not None:
+                sim_time = self.world_snapshot.timestamp.elapsed_seconds
+                rr.set_time("simulation_time", timestamp=sim_time)
 
             # Log ego vehicle position
             if len(self.ego_history_xyz) > 0:
