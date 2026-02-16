@@ -28,6 +28,9 @@ dev = [
   "ipykernel>=6.29.3",
   "ipywidgets>=8.1.8",
 ]
+carla = [
+  "carla>=0.9.15",
+]
 
 [tool.uv]
 no-build-isolation-package = ["flash-attn"]

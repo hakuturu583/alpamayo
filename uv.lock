@@ -1,5 +1,5 @@
 version = 1
-revision = 2
+revision = 3
 requires-python = "==3.12.*"
 
 [[package]]
@@ -40,6 +40,9 @@ dependencies = [
 ]
 
 [package.dev-dependencies]
+carla = [
+    { name = "carla" },
+]
 dev = [
     { name = "ipykernel" },
     { name = "ipywidgets" },
@@ -64,6 +67,7 @@ requires-dist = [
 ]
 
 [package.metadata.requires-dev]
+carla = [{ name = "carla", specifier = ">=0.9.15" }]
 dev = [
     { name = "ipykernel", specifier = ">=6.29.3" },
     { name = "ipywidgets", specifier = ">=8.1.8" },
@@ -108,6 +112,15 @@ wheels = [
     { url = "https://files.pythonhosted.org/packages/32/b2/357cc063185043eb757b4a48782bff780826103bcad1eb40c3ddfc050b7e/av-16.0.1-cp312-cp312-musllinux_1_2_aarch64.whl", hash = "sha256:6573da96e8bebc3536860a7def108d7dbe1875c86517072431ced702447e6aea", size = 40241993, upload-time = "2025-10-13T12:26:06.993Z" },
     { url = "https://files.pythonhosted.org/packages/20/bb/ced42a4588ba168bf0ef1e9d016982e3ba09fde6992f1dda586fd20dcf71/av-16.0.1-cp312-cp312-musllinux_1_2_x86_64.whl", hash = "sha256:4bc064e48a8de6c087b97dd27cf4ef8c13073f0793108fbce3ecd721201b2502", size = 41532235, upload-time = "2025-10-13T12:26:12.488Z" },
     { url = "https://files.pythonhosted.org/packages/15/37/c7811eca0f318d5fd3212f7e8c3d8335f75a54907c97a89213dc580b8056/av-16.0.1-cp312-cp312-win_amd64.whl", hash = "sha256:0c669b6b6668c8ae74451c15ec6d6d8a36e4c3803dc5d9910f607a174dd18f17", size = 32296912, upload-time = "2025-10-13T12:26:19.187Z" },
+]
+
+[[package]]
+name = "carla"
+version = "0.9.16"
+source = { registry = "https://pypi.org/simple" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/a4/37/c43a7c9d0dc8bd8d0791116998a49c178ab4906a0430150b21372306e520/carla-0.9.16-cp312-cp312-manylinux_2_31_x86_64.whl", hash = "sha256:c323a7b1f8ad3ac81cfac79f5d96c9cac8afa6d0a768fa2fffa46bb336945c4f", size = 34230684, upload-time = "2025-09-14T07:54:50.049Z" },
+    { url = "https://files.pythonhosted.org/packages/8d/6f/47b4778834ed2bbc8e3312e533c82fdd000ce71cff2ade01d0804ec69a96/carla-0.9.16-cp312-cp312-win_amd64.whl", hash = "sha256:f1f22d153b1a43b579d90e816b7016ca19f1483ca64cbc5ebbcd4dbf325e3356", size = 5037190, upload-time = "2025-09-14T07:54:52.916Z" },
 ]
 
 [[package]]
