@@ -175,8 +175,9 @@ class AlpamayoController:
             # Prepare input data
             model_input = self._prepare_model_input()
 
-            # Run inference with no_grad and autocast to reduce VRAM usage
-            with torch.no_grad(), torch.autocast("cuda", dtype=torch.bfloat16):
+            # Run inference with inference_mode (more efficient than no_grad) and autocast
+            # inference_mode disables view tracking and version counter, reducing memory overhead
+            with torch.inference_mode(), torch.autocast("cuda", dtype=torch.bfloat16):
                 pred_xyz, pred_rot, extra = self.model.sample_trajectories_from_data_with_vlm_rollout(
                     data=model_input,
                     top_p=0.98,
@@ -190,6 +191,9 @@ class AlpamayoController:
             # pred_xyz shape: [batch_size, num_traj_sets, num_traj_samples, num_timesteps, 3]
             self.predicted_trajectory = pred_xyz.cpu().numpy()[0, 0, 0]  # (num_timesteps, 3)
 
+            # Delete intermediate tensors to free memory immediately
+            del pred_xyz, pred_rot, extra, model_input
+
             # Clear CUDA cache to free memory for next inference
             torch.cuda.empty_cache()
 
@@ -198,11 +202,17 @@ class AlpamayoController:
             import traceback
             traceback.print_exc()
 
-            # Clear cache on error
+            # Aggressive memory cleanup on error
+            if 'model_input' in locals():
+                del model_input
             torch.cuda.empty_cache()
 
             # Exit on model error (especially CUDA OOM)
             print("Exiting due to model inference failure.")
+            print("If you're still getting CUDA OOM, consider:")
+            print("  1. Further reducing image resolution in controller.py")
+            print("  2. Reducing max_generation_length (currently 256)")
+            print("  3. Ensuring Flash Attention 2 is properly installed")
             import sys
             sys.exit(1)
 
@@ -240,9 +250,10 @@ class AlpamayoController:
         image_list = []
         for cam_name, image in sorted_cameras:
             # Downscale images to reduce VRAM usage
-            # 1920x1080 -> 320x180 (1/6 scale for maximum VRAM reduction)
+            # 1920x1080 -> 240x135 (1/8 scale for maximum VRAM reduction)
+            # Further reduced from 320x180 to save more VRAM
             image_pil = Image.fromarray(image)
-            image_resized = image_pil.resize((320, 180), Image.LANCZOS)
+            image_resized = image_pil.resize((240, 135), Image.LANCZOS)
             image_resized = np.array(image_resized)
 
             # Convert to tensor (H, W, C) -> (C, H, W)

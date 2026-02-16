@@ -378,6 +378,9 @@ class ReasoningVLA(PreTrainedModel, TrajectoryFusionMixin):
         self.original_vocab_size = vlm_config.text_config.vocab_size
         vlm_config.text_config.vocab_size = config.vocab_size
         vlm_config.vocab_size = config.vocab_size
+        # Set attn_implementation in text_config as well for proper propagation
+        if hasattr(vlm_config, 'text_config') and config.attn_implementation:
+            vlm_config.text_config._attn_implementation = config.attn_implementation
         self.vlm = Qwen3VLForConditionalGeneration(vlm_config)
 
     def _initialize_trajectory_tokenizers(

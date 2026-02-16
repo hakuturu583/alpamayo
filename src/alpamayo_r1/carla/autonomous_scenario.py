@@ -128,9 +128,13 @@ def main():
     processor = None
     if not args.no_model:
         print("Loading Alpamayo R1 model from nvidia/Alpamayo-R1-10B")
+        import os
         import torch
         from alpamayo_r1 import helper
         from alpamayo_r1.models.alpamayo_r1 import AlpamayoR1
+
+        # Set CUDA memory management environment variable to reduce fragmentation
+        os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
 
         # Check CUDA availability
         if not torch.cuda.is_available():
@@ -144,10 +148,24 @@ def main():
         print(f"CUDA device name: {torch.cuda.get_device_name(0)}")
         print(f"CUDA memory: {torch.cuda.get_device_properties(0).total_memory / 1e9:.2f} GB")
 
+        # Enable TF32 for better performance and memory efficiency
+        torch.backends.cuda.matmul.allow_tf32 = True
+        torch.backends.cudnn.allow_tf32 = True
+
         try:
+            # Clear CUDA cache before loading model
+            torch.cuda.empty_cache()
+
             print("Loading model...")
+            print("Configuring Flash Attention 2 for memory efficiency...")
+
+            # Load config and explicitly set attn_implementation for VLM
+            from alpamayo_r1.models.alpamayo_r1 import AlpamayoR1Config
+            config = AlpamayoR1Config.from_pretrained("nvidia/Alpamayo-R1-10B")
+            config.attn_implementation = "flash_attention_2"  # Enable Flash Attention 2 for VLM
+
             model = AlpamayoR1.from_pretrained(
-                "nvidia/Alpamayo-R1-10B", dtype=torch.bfloat16
+                "nvidia/Alpamayo-R1-10B", config=config, dtype=torch.bfloat16
             ).to("cuda")
 
             print("Loading processor...")
