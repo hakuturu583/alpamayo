@@ -557,6 +557,14 @@ class AlpamayoController:
         control.steer = float(steering)
         control.brake = float(brake)
 
+        # Debug output
+        print(f"[Control] Step: {self.step_count:4d} | "
+              f"Target: ({target_x:5.2f}, {target_y:5.2f}) | "
+              f"Speed: {current_speed:4.1f}/{self.target_speed:4.1f} m/s | "
+              f"Throttle: {control.throttle:.3f} | "
+              f"Steer: {control.steer:6.3f} | "
+              f"Brake: {control.brake:.3f}")
+
         self.ego_vehicle.apply_control(control)
 
     def _apply_simple_control(self) -> None:
@@ -573,6 +581,12 @@ class AlpamayoController:
         control.throttle = float(throttle)
         control.steer = 0.0
         control.brake = 0.0
+
+        # Debug output
+        print(f"[Control-Simple] Step: {self.step_count:4d} | "
+              f"Speed: {current_speed:4.1f}/{self.target_speed:4.1f} m/s | "
+              f"Throttle: {control.throttle:.3f} | "
+              f"(No trajectory available)")
 
         self.ego_vehicle.apply_control(control)
 
