@@ -468,13 +468,34 @@ class BaseScenario(ABC):
 
         print(f"Created {len(self.pedestrian_controllers)} controllers, starting AI...")
 
-        # Start walking behavior with safety checks
+        # Start controllers first (without setting destinations)
         for i, controller in enumerate(self.pedestrian_controllers):
             try:
                 if controller is None or not controller.is_alive:
                     continue
 
                 controller.start()
+
+                # Tick after each start for stability
+                if (i + 1) % 3 == 0:
+                    self.world.tick()
+                    time.sleep(0.05)
+
+            except Exception as e:
+                print(f"Failed to start controller {i}: {e}")
+                continue
+
+        # Wait for all controllers to fully start
+        self.world.tick()
+        time.sleep(0.2)
+
+        print("Setting destinations and speeds...")
+
+        # Now set destinations and speeds
+        for i, controller in enumerate(self.pedestrian_controllers):
+            try:
+                if controller is None or not controller.is_alive:
+                    continue
 
                 # Set random destination
                 destination = carla.Location(
@@ -483,17 +504,23 @@ class BaseScenario(ABC):
                     z=ego_location.z,
                 )
                 controller.go_to_location(destination)
-                controller.set_max_speed(float(np.random.uniform(1.0, 2.0)))
 
-                # Small tick every few starts
-                if (i + 1) % 5 == 0:
+                # Set speed (limit to reasonable range)
+                speed = float(np.clip(np.random.uniform(1.0, 2.0), 0.5, 3.0))
+                controller.set_max_speed(speed)
+
+                # Tick every few operations
+                if (i + 1) % 3 == 0:
                     self.world.tick()
+                    time.sleep(0.05)
 
             except Exception as e:
-                print(f"Failed to start controller {i}: {e}")
+                print(f"Failed to set destination for controller {i}: {e}")
                 continue
 
-        # Final tick
+        # Final ticks to ensure all operations are processed
+        self.world.tick()
+        time.sleep(0.1)
         self.world.tick()
 
         print(f"Successfully spawned {len(self.pedestrian_npcs)} pedestrian NPCs with {len(self.pedestrian_controllers)} controllers")
