@@ -70,6 +70,9 @@ class BaseScenario(ABC):
         self.pedestrian_controllers = []
         self.sensors = []
 
+        # Spawn point management
+        self.available_spawn_points = []
+
     @abstractmethod
     def setup(self) -> None:
         """Set up the scenario.
@@ -148,8 +151,11 @@ class BaseScenario(ABC):
 
         # Stop pedestrian controllers first
         for controller in self.pedestrian_controllers:
-            if controller is not None and controller.is_alive:
-                controller.stop()
+            try:
+                if controller is not None and controller.is_alive:
+                    controller.stop()
+            except RuntimeError:
+                pass  # Already destroyed
 
         # Destroy all actors
         actors_to_destroy = (
@@ -163,8 +169,11 @@ class BaseScenario(ABC):
             actors_to_destroy.append(self.ego_vehicle)
 
         for actor in actors_to_destroy:
-            if actor is not None and actor.is_alive:
-                actor.destroy()
+            try:
+                if actor is not None and actor.is_alive:
+                    actor.destroy()
+            except RuntimeError:
+                pass  # Already destroyed
 
         # Clear lists
         self.sensors.clear()
@@ -190,3 +199,189 @@ class BaseScenario(ABC):
             event: CARLA lane invasion event
         """
         pass
+
+    # Utility methods for common scenario operations
+
+    def allocate_spawn_points(self, ego_spawn_index: int = 0) -> Any:
+        """Allocate spawn points, reserving one for ego vehicle.
+
+        Args:
+            ego_spawn_index: Index of spawn point to use for ego vehicle
+
+        Returns:
+            Spawn point for ego vehicle
+        """
+        all_spawn_points = self.world.get_map().get_spawn_points()
+        print(f"Available spawn points: {len(all_spawn_points)}")
+
+        if len(all_spawn_points) == 0:
+            raise RuntimeError("No spawn points available on this map")
+
+        # Get spawn point for ego vehicle
+        ego_spawn_index = min(ego_spawn_index, len(all_spawn_points) - 1)
+        ego_spawn_point = all_spawn_points[ego_spawn_index]
+
+        # Store remaining spawn points for NPCs
+        self.available_spawn_points = [
+            sp for i, sp in enumerate(all_spawn_points) if i != ego_spawn_index
+        ]
+
+        # Limit vehicle NPCs to available spawn points
+        requested_vehicles = self.config.get("num_vehicles", 30)
+        max_vehicles = len(self.available_spawn_points)
+        if requested_vehicles > max_vehicles:
+            print(
+                f"Warning: Requested {requested_vehicles} vehicles but only "
+                f"{max_vehicles} spawn points available. Limiting to {max_vehicles}."
+            )
+            self.config["num_vehicles"] = max_vehicles
+
+        return ego_spawn_point
+
+    def spawn_ego_vehicle(
+        self, spawn_point: Any = None, vehicle_model: str = "vehicle.tesla.model3"
+    ) -> Any:
+        """Spawn ego vehicle at specified spawn point.
+
+        Args:
+            spawn_point: Spawn point for ego vehicle (if None, uses spawn_point_index from config)
+            vehicle_model: Vehicle blueprint ID
+
+        Returns:
+            Spawned ego vehicle actor
+        """
+        if spawn_point is None:
+            spawn_idx = self.config.get("spawn_point_index", 0)
+            spawn_point = self.allocate_spawn_points(spawn_idx)
+
+        blueprint_library = self.world.get_blueprint_library()
+        vehicle_bp = blueprint_library.filter(vehicle_model)[0]
+        self.ego_vehicle = self.world.spawn_actor(vehicle_bp, spawn_point)
+
+        print(f"Ego vehicle spawned at {spawn_point.location}")
+        return self.ego_vehicle
+
+    def spawn_vehicle_npcs(self, num_vehicles: int) -> list[Any]:
+        """Spawn vehicle NPCs using TrafficManager.
+
+        Args:
+            num_vehicles: Number of vehicles to spawn
+
+        Returns:
+            List of spawned vehicle actors
+        """
+        import numpy as np
+
+        blueprint_library = self.world.get_blueprint_library()
+        vehicle_bps = blueprint_library.filter("vehicle.*")
+
+        # Use pre-allocated spawn points
+        if not self.available_spawn_points:
+            print("Warning: No spawn points available for vehicle NPCs")
+            return []
+
+        # Limit to available spawn points
+        num_to_spawn = min(num_vehicles, len(self.available_spawn_points))
+
+        spawned = 0
+        for i in range(num_to_spawn):
+            spawn_point = self.available_spawn_points[i]
+            vehicle_bp = np.random.choice(vehicle_bps)
+
+            try:
+                vehicle = self.world.spawn_actor(vehicle_bp, spawn_point)
+                vehicle.set_autopilot(True, self.traffic_manager.get_port())
+                self.vehicle_npcs.append(vehicle)
+                spawned += 1
+            except RuntimeError as e:
+                print(f"Failed to spawn vehicle at point {i}: {e}")
+                continue
+
+        print(f"Spawned {len(self.vehicle_npcs)} vehicle NPCs (requested: {num_vehicles})")
+        return self.vehicle_npcs
+
+    def spawn_pedestrian_npcs(
+        self, num_pedestrians: int, spawn_radius: float = 60.0
+    ) -> tuple[list[Any], list[Any]]:
+        """Spawn pedestrian NPCs with AI walker controllers.
+
+        Args:
+            num_pedestrians: Number of pedestrians to spawn
+            spawn_radius: Radius around ego vehicle for spawning (in meters)
+
+        Returns:
+            Tuple of (pedestrian actors, controller actors)
+        """
+        import numpy as np
+
+        if self.ego_vehicle is None:
+            print("Warning: Ego vehicle must be spawned before pedestrians")
+            return [], []
+
+        blueprint_library = self.world.get_blueprint_library()
+        walker_bps = blueprint_library.filter("walker.pedestrian.*")
+        controller_bp = blueprint_library.find("controller.ai.walker")
+
+        ego_location = self.ego_vehicle.get_location()
+
+        # Spawn pedestrians
+        for _ in range(num_pedestrians):
+            spawn_point = self.world.get_blueprint_library().find("controller.ai.walker")
+            spawn_point = type("Transform", (), {})()
+            spawn_point.location = ego_location + type("Location", (), {})(
+                x=np.random.uniform(-spawn_radius, spawn_radius),
+                y=np.random.uniform(-spawn_radius, spawn_radius),
+                z=0.5,
+            )
+
+            # Convert to proper CARLA Transform
+            import carla
+
+            spawn_transform = carla.Transform()
+            spawn_transform.location = carla.Location(
+                x=ego_location.x + np.random.uniform(-spawn_radius, spawn_radius),
+                y=ego_location.y + np.random.uniform(-spawn_radius, spawn_radius),
+                z=ego_location.z + 0.5,
+            )
+
+            walker_bp = np.random.choice(walker_bps)
+
+            try:
+                pedestrian = self.world.spawn_actor(walker_bp, spawn_transform)
+                self.pedestrian_npcs.append(pedestrian)
+            except RuntimeError:
+                continue
+
+        # Wait for pedestrians to be registered
+        self.world.tick()
+
+        # Spawn controllers
+        for pedestrian in self.pedestrian_npcs:
+            try:
+                import carla
+
+                controller = self.world.spawn_actor(
+                    controller_bp, carla.Transform(), pedestrian
+                )
+                self.pedestrian_controllers.append(controller)
+            except RuntimeError:
+                continue
+
+        # Wait for controllers to be registered
+        self.world.tick()
+
+        # Start walking behavior
+        for controller in self.pedestrian_controllers:
+            import carla
+
+            controller.start()
+            destination = carla.Location(
+                x=ego_location.x + np.random.uniform(-spawn_radius, spawn_radius),
+                y=ego_location.y + np.random.uniform(-spawn_radius, spawn_radius),
+                z=ego_location.z,
+            )
+            controller.go_to_location(destination)
+            controller.set_max_speed(np.random.uniform(1.0, 2.0))
+
+        print(f"Spawned {len(self.pedestrian_npcs)} pedestrian NPCs")
+        return self.pedestrian_npcs, self.pedestrian_controllers

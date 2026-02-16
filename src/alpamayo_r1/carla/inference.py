@@ -427,18 +427,27 @@ class CARLASimulation:
 
         # Destroy cameras
         for camera in self.cameras.values():
-            if camera.is_alive:
-                camera.destroy()
+            try:
+                if camera is not None and camera.is_alive:
+                    camera.destroy()
+            except RuntimeError:
+                pass  # Already destroyed
 
         # Destroy ego vehicle
-        if self.ego_vehicle is not None and self.ego_vehicle.is_alive:
-            self.ego_vehicle.destroy()
+        try:
+            if self.ego_vehicle is not None and self.ego_vehicle.is_alive:
+                self.ego_vehicle.destroy()
+        except RuntimeError:
+            pass  # Already destroyed
 
         # Restore asynchronous mode
         if self.world is not None:
-            settings = self.world.get_settings()
-            settings.synchronous_mode = False
-            self.world.apply_settings(settings)
+            try:
+                settings = self.world.get_settings()
+                settings.synchronous_mode = False
+                self.world.apply_settings(settings)
+            except RuntimeError:
+                pass  # World might be invalid
 
         self.cameras.clear()
         self.camera_queues.clear()
