@@ -79,6 +79,7 @@ class AlpamayoController:
         """Initialize Rerun for visualization."""
         try:
             import rerun as rr
+            import rerun.blueprint as rrb
 
             print("Initializing Rerun visualization...")
 
@@ -95,6 +96,43 @@ class AlpamayoController:
                 rr.ViewCoordinates.RIGHT_HAND_Y_DOWN,
                 static=True,
             )
+
+            # Define explicit blueprint layout with only used cameras
+            blueprint = rrb.Blueprint(
+                rrb.Horizontal(
+                    rrb.Spatial3DView(
+                        name="3D View",
+                        origin="world",
+                    ),
+                    rrb.Vertical(
+                        rrb.Spatial2DView(
+                            name="Front Wide (120°)",
+                            origin="cameras/camera_front_wide_120fov",
+                        ),
+                        rrb.Spatial2DView(
+                            name="Front Tele (30°)",
+                            origin="cameras/camera_front_tele_30fov",
+                        ),
+                        column_shares=[1, 1],
+                    ),
+                    rrb.Vertical(
+                        rrb.Spatial2DView(
+                            name="Cross Left (120°)",
+                            origin="cameras/camera_cross_left_120fov",
+                        ),
+                        rrb.Spatial2DView(
+                            name="Cross Right (120°)",
+                            origin="cameras/camera_cross_right_120fov",
+                        ),
+                        column_shares=[1, 1],
+                    ),
+                    column_shares=[2, 1, 1],
+                ),
+                collapse_panels=True,
+            )
+
+            # Send blueprint to define the layout
+            rr.send_blueprint(blueprint)
 
             print("Rerun visualization initialized (saving to alpamayo_carla.rrd)")
             print("After simulation completes, view recording with:")
