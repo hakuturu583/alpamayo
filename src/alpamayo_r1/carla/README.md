@@ -7,9 +7,7 @@ This directory contains code for integrating the Alpamayo R1 model with the CARL
 - **inference.py**: Main CARLA simulation class
 - **scenario.py**: Base scenario class with Alpamayo controller support
 - **controller.py**: Alpamayo R1 model-based controller for autonomous driving
-- **example_scenario.py**: Example scenario implementation
-- **autonomous_scenario.py**: Autonomous driving scenario using Alpamayo controller
-- **run_inference.py**: Inference script using Alpamayo R1 model
+- **autonomous_scenario.py**: Main autonomous driving scenario (primary entry point)
 
 ## Camera Configuration
 
@@ -148,61 +146,6 @@ with CARLASimulation(host="localhost", port=2000) as sim:
 
     sim.run_scenario(scenario, num_steps=1000)
 ```
-
-## Running Example Scenarios
-
-### Connect to Local CARLA Server
-
-```bash
-python -m alpamayo_r1.carla.example_scenario
-```
-
-### Connect to Remote CARLA Server
-
-```bash
-# Specify host and port
-python -m alpamayo_r1.carla.example_scenario --host 192.168.1.100 --port 2000
-
-# Also specify map
-python -m alpamayo_r1.carla.example_scenario --host 192.168.1.100 --port 2000 --map Town05
-```
-
-### Command Line Arguments
-
-```bash
-python -m alpamayo_r1.carla.example_scenario --help
-```
-
-- `--host`: CARLA server host address (default: localhost)
-- `--port`: CARLA server port (default: 2000)
-- `--map`: Map to load (default: Town01)
-
-## Running Inference Script
-
-```bash
-# Local server
-python -m alpamayo_r1.carla.run_inference
-
-# Remote server with custom parameters
-python -m alpamayo_r1.carla.run_inference \
-    --host 192.168.1.100 \
-    --port 2000 \
-    --map Town05 \
-    --num-vehicles 100 \
-    --num-pedestrians 50 \
-    --num-steps 5000
-```
-
-### Inference Script Arguments
-
-- `--host`: CARLA server host address (default: localhost)
-- `--port`: CARLA server port (default: 2000)
-- `--map`: Map to load (default: Town01)
-- `--num-vehicles`: Number of vehicle NPCs (default: 50)
-- `--num-pedestrians`: Number of pedestrian NPCs (default: 30)
-- `--num-steps`: Number of simulation steps (default: 2000)
-- `--spawn-point`: Spawn point index for ego vehicle (default: 0)
-- `--model-path`: Path to Alpamayo R1 model checkpoint (optional)
 
 ## Alpamayo Controller
 
