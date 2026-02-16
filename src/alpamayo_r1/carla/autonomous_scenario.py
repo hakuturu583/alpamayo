@@ -138,22 +138,47 @@ def main():
             import torch
             from transformers import AutoModelForCausalLM, AutoProcessor
 
+            # Check CUDA availability
+            print(f"CUDA available: {torch.cuda.is_available()}")
+            if torch.cuda.is_available():
+                print(f"CUDA device count: {torch.cuda.device_count()}")
+                print(f"CUDA device name: {torch.cuda.get_device_name(0)}")
+                print(f"CUDA memory: {torch.cuda.get_device_properties(0).total_memory / 1e9:.2f} GB")
+            else:
+                print("WARNING: CUDA not available, model will load on CPU")
+
             print("Loading processor...")
             processor = AutoProcessor.from_pretrained(args.model_path)
 
             print("Loading model...")
+            # Use explicit GPU device if available
+            if torch.cuda.is_available():
+                device_map = "cuda:0"
+                print(f"Loading model to GPU (device_map={device_map})")
+            else:
+                device_map = "auto"
+                print(f"Loading model with device_map=auto (will use CPU)")
+
             model = AutoModelForCausalLM.from_pretrained(
                 args.model_path,
                 torch_dtype=torch.bfloat16,
-                device_map="auto",
+                device_map=device_map,
             )
             model.eval()
 
-            print(f"Model loaded successfully on device: {model.device}")
+            print(f"Model loaded successfully!")
+            print(f"Model device: {model.device}")
             print(f"Model dtype: {model.dtype}")
+
+            # Check model memory usage
+            if torch.cuda.is_available():
+                print(f"GPU memory allocated: {torch.cuda.memory_allocated(0) / 1e9:.2f} GB")
+                print(f"GPU memory reserved: {torch.cuda.memory_reserved(0) / 1e9:.2f} GB")
 
         except Exception as e:
             print(f"Failed to load model: {e}")
+            import traceback
+            traceback.print_exc()
             print("Falling back to rule-based controller")
             model = None
             processor = None
