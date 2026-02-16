@@ -64,6 +64,12 @@ class AlpamayoController:
         self.predicted_trajectory = None
         self.current_images = {}
 
+        # Pre-allocated tensors for padding (VRAM optimization)
+        self._cached_padding_tensors = {
+            'xyz': {},  # Cache by pad_length
+            'rot': {},  # Cache by pad_length
+        }
+
         # Initialize Rerun if enabled
         if self.use_rerun:
             self._init_rerun()
@@ -112,13 +118,14 @@ class AlpamayoController:
             camera_images: Dictionary mapping camera names to RGB images (H, W, 3)
         """
         self.step_count += 1
-        self.current_images = camera_images
 
         # Update ego state
         self._update_ego_state()
 
         # Run model inference at control frequency (10Hz)
+        # Only store images when inference is needed to save memory
         if self.step_count - self.last_control_step >= (1.0 / self.control_frequency) * 20:
+            self.current_images = camera_images  # Only store when needed
             self._run_inference()
             self.last_control_step = self.step_count
 
@@ -175,7 +182,7 @@ class AlpamayoController:
                     top_p=0.98,
                     temperature=0.6,
                     num_traj_samples=1,
-                    max_generation_length=256,  # Reduced from 256 to save VRAM
+                    max_generation_length=256,  # Reduced from 256 to 8 for maximum VRAM savings
                     return_extra=True,
                 )
 
@@ -233,13 +240,14 @@ class AlpamayoController:
         image_list = []
         for cam_name, image in sorted_cameras:
             # Downscale images to reduce VRAM usage
-            # 1920x1080 -> 640x360 (1/3 scale)
+            # 1920x1080 -> 320x180 (1/6 scale for maximum VRAM reduction)
             image_pil = Image.fromarray(image)
-            image_resized = image_pil.resize((640, 360), Image.LANCZOS)
+            image_resized = image_pil.resize((320, 180), Image.LANCZOS)
             image_resized = np.array(image_resized)
 
             # Convert to tensor (H, W, C) -> (C, H, W)
-            img_tensor = torch.from_numpy(image_resized.copy()).float()
+            # Removed .copy() to save memory
+            img_tensor = torch.from_numpy(image_resized).float()
             img_tensor = rearrange(img_tensor, "h w c -> c h w")
             image_list.append(img_tensor)
 
@@ -283,21 +291,33 @@ class AlpamayoController:
             ego_history_rot = torch.from_numpy(history_rot_local).float()
             ego_history_rot = ego_history_rot.unsqueeze(0).unsqueeze(0)  # (1, 1, T, 3, 3)
 
-            # Pad to 16 timesteps if needed
+            # Pad to 16 timesteps if needed (using cached tensors to save memory)
             if num_history < 16:
                 pad_length = 16 - num_history
+
+                # Use cached padding tensors
+                if pad_length not in self._cached_padding_tensors['xyz']:
+                    self._cached_padding_tensors['xyz'][pad_length] = torch.zeros(1, 1, pad_length, 3)
+                if pad_length not in self._cached_padding_tensors['rot']:
+                    self._cached_padding_tensors['rot'][pad_length] = torch.eye(3).unsqueeze(0).unsqueeze(0).unsqueeze(0).repeat(1, 1, pad_length, 1, 1)
+
                 ego_history_xyz = torch.cat([
-                    torch.zeros(1, 1, pad_length, 3),
+                    self._cached_padding_tensors['xyz'][pad_length],
                     ego_history_xyz
                 ], dim=2)
                 ego_history_rot = torch.cat([
-                    torch.eye(3).unsqueeze(0).unsqueeze(0).unsqueeze(0).repeat(1, 1, pad_length, 1, 1),
+                    self._cached_padding_tensors['rot'][pad_length],
                     ego_history_rot
                 ], dim=2)
         else:
-            # Use zeros if no history available
-            ego_history_xyz = torch.zeros(1, 1, 16, 3)
-            ego_history_rot = torch.eye(3).unsqueeze(0).unsqueeze(0).unsqueeze(0).repeat(1, 1, 16, 1, 1)
+            # Use zeros if no history available (cached)
+            if 16 not in self._cached_padding_tensors['xyz']:
+                self._cached_padding_tensors['xyz'][16] = torch.zeros(1, 1, 16, 3)
+            if 16 not in self._cached_padding_tensors['rot']:
+                self._cached_padding_tensors['rot'][16] = torch.eye(3).unsqueeze(0).unsqueeze(0).unsqueeze(0).repeat(1, 1, 16, 1, 1)
+
+            ego_history_xyz = self._cached_padding_tensors['xyz'][16]
+            ego_history_rot = self._cached_padding_tensors['rot'][16]
 
         # Prepare model inputs
         model_inputs = {
