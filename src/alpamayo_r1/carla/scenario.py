@@ -307,11 +307,14 @@ class BaseScenario(ABC):
 
         raise RuntimeError("Failed to spawn ego vehicle")
 
-    def spawn_vehicle_npcs(self, num_vehicles: int) -> list[Any]:
+    def spawn_vehicle_npcs(
+        self, num_vehicles: int, min_distance_from_ego: float = 20.0
+    ) -> list[Any]:
         """Spawn vehicle NPCs using TrafficManager.
 
         Args:
             num_vehicles: Number of vehicles to spawn
+            min_distance_from_ego: Minimum distance from ego vehicle (meters)
 
         Returns:
             List of spawned vehicle actors
@@ -326,20 +329,49 @@ class BaseScenario(ABC):
             print("Warning: No spawn points available for vehicle NPCs")
             return []
 
-        # Limit to available spawn points
-        num_to_spawn = min(num_vehicles, len(self.available_spawn_points))
+        # Filter spawn points by distance from ego vehicle
+        ego_location = self.ego_vehicle.get_location() if self.ego_vehicle else None
+        valid_spawn_points = []
+
+        for spawn_point in self.available_spawn_points:
+            if ego_location is None:
+                valid_spawn_points.append(spawn_point)
+            else:
+                distance = spawn_point.location.distance(ego_location)
+                if distance >= min_distance_from_ego:
+                    valid_spawn_points.append(spawn_point)
+
+        if not valid_spawn_points:
+            print(
+                f"Warning: No spawn points found with minimum distance "
+                f"{min_distance_from_ego}m from ego vehicle"
+            )
+            return []
+
+        print(
+            f"Found {len(valid_spawn_points)} valid spawn points "
+            f"(min distance: {min_distance_from_ego}m)"
+        )
+
+        # Limit to valid spawn points
+        num_to_spawn = min(num_vehicles, len(valid_spawn_points))
 
         spawned = 0
         for i in range(num_to_spawn):
-            spawn_point = self.available_spawn_points[i]
+            spawn_point = valid_spawn_points[i]
             vehicle_bp = np.random.choice(vehicle_bps)
 
             try:
-                vehicle = self.world.spawn_actor(vehicle_bp, spawn_point)
-                vehicle.set_autopilot(True, self.traffic_manager.get_port())
-                self.vehicle_npcs.append(vehicle)
-                spawned += 1
-            except RuntimeError as e:
+                # Use try_spawn_actor for safer spawning
+                vehicle = self.world.try_spawn_actor(vehicle_bp, spawn_point)
+                if vehicle is not None:
+                    vehicle.set_autopilot(True, self.traffic_manager.get_port())
+                    self.vehicle_npcs.append(vehicle)
+                    spawned += 1
+                else:
+                    # try_spawn_actor returns None on failure (no exception)
+                    pass
+            except Exception as e:
                 print(f"Failed to spawn vehicle at point {i}: {e}")
                 continue
 
