@@ -145,6 +145,11 @@ class BaseScenario(ABC):
         """
         print("Cleaning up scenario...")
 
+        # Close Alpamayo controller (saves video)
+        if self.alpamayo_controller is not None:
+            self.alpamayo_controller.close()
+            self.alpamayo_controller = None
+
         # Stop pedestrian controllers first
         for controller in self.pedestrian_controllers:
             try:

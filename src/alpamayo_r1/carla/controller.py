@@ -3,6 +3,7 @@
 from typing import Any
 
 import carla
+import cv2
 import numpy as np
 import scipy.spatial.transform as spt
 import torch
@@ -30,6 +31,8 @@ class AlpamayoController:
         model: Any = None,
         processor: Any = None,
         control_frequency: float = 10.0,
+        save_video: bool = True,
+        video_path: str = "trajectory_visualization.mp4",
     ):
         """Initialize Alpamayo controller.
 
@@ -39,12 +42,16 @@ class AlpamayoController:
             model: Alpamayo R1 model instance (optional)
             processor: Model processor/tokenizer instance (optional)
             control_frequency: Control update frequency in Hz (default: 10Hz)
+            save_video: Whether to save visualization video (default: True)
+            video_path: Path to save video (default: trajectory_visualization.mp4)
         """
         self.ego_vehicle = ego_vehicle
         self.cameras = cameras
         self.model = model
         self.processor = processor
         self.control_frequency = control_frequency
+        self.save_video = save_video
+        self.video_path = video_path
 
         # Control parameters
         self.target_speed = 5.0  # m/s (about 18 km/h)
@@ -67,6 +74,173 @@ class AlpamayoController:
             'xyz': {},  # Cache by pad_length
             'rot': {},  # Cache by pad_length
         }
+
+        # Video writer for trajectory visualization
+        self.video_writer = None
+        if self.save_video:
+            self._init_video_writer()
+
+        # Camera parameters for projection
+        self._init_camera_params()
+
+    def _init_video_writer(self) -> None:
+        """Initialize video writer for trajectory visualization."""
+        # Video parameters (1920x1080 at 20 FPS to match CARLA simulation)
+        fourcc = cv2.VideoWriter_fourcc(*'mp4v')
+        self.video_writer = cv2.VideoWriter(
+            self.video_path,
+            fourcc,
+            20.0,  # FPS (CARLA default)
+            (1920, 1080)  # Resolution
+        )
+        print(f"Initialized video writer: {self.video_path}")
+
+    def _init_camera_params(self) -> None:
+        """Initialize camera parameters for projection."""
+        # Get front wide camera
+        front_camera = self.cameras.get("camera_front_wide_120fov")
+        if front_camera is None:
+            print("Warning: camera_front_wide_120fov not found")
+            return
+
+        # Camera intrinsics (1920x1080, 120° FOV)
+        self.image_width = 1920
+        self.image_height = 1080
+        self.fov = 120.0  # degrees
+
+        # Calculate focal length from FOV
+        # f = (image_width / 2) / tan(fov / 2)
+        fov_rad = np.radians(self.fov)
+        self.focal_length = (self.image_width / 2.0) / np.tan(fov_rad / 2.0)
+
+        # Camera intrinsic matrix
+        cx = self.image_width / 2.0
+        cy = self.image_height / 2.0
+        self.K = np.array([
+            [self.focal_length, 0, cx],
+            [0, self.focal_length, cy],
+            [0, 0, 1]
+        ])
+
+        # Camera extrinsics (relative to ego vehicle)
+        # Get relative transform from camera sensor
+        camera_transform = front_camera.get_transform()
+
+        # Camera position relative to ego vehicle (in ego vehicle frame)
+        # CARLA camera is typically mounted at [1.5, 0, 2.0] for front camera
+        cam_loc = camera_transform.location
+        self.camera_offset = np.array([cam_loc.x, cam_loc.y, cam_loc.z])
+
+        # Camera rotation relative to ego vehicle
+        cam_rot = camera_transform.rotation
+        pitch = np.radians(cam_rot.pitch)
+        yaw = np.radians(cam_rot.yaw)
+        roll = np.radians(cam_rot.roll)
+
+        # Store relative rotation (this doesn't change as camera is fixed to vehicle)
+        self.camera_rotation = spt.Rotation.from_euler('zyx', [yaw, pitch, roll])
+
+    def _project_trajectory_to_image(self, trajectory_local: np.ndarray) -> tuple:
+        """Project 3D trajectory to 2D image coordinates.
+
+        Args:
+            trajectory_local: Trajectory in ego vehicle local frame (N, 3)
+                             where X=forward, Y=left, Z=up
+
+        Returns:
+            Tuple of (2D image coordinates (N, 2), valid mask (N,))
+        """
+        if trajectory_local.shape[0] == 0:
+            return np.array([]), np.array([])
+
+        # Transform from ego vehicle frame to camera frame
+        # Ego frame: X=forward, Y=left, Z=up
+        # Camera frame (CARLA): X=forward, Y=right, Z=up
+        # Note: Camera rotation is usually identity for front camera
+
+        # Translate to camera position (camera is offset from ego center)
+        traj_translated = trajectory_local - self.camera_offset
+
+        # Apply camera rotation (if camera is not aligned with vehicle)
+        # This converts from ego frame to camera frame
+        traj_cam = self.camera_rotation.inv().apply(traj_translated)
+
+        # Filter points behind camera (X > 0 in CARLA camera frame)
+        # In CARLA camera coordinate: X=forward, Y=right, Z=up
+        valid_mask = traj_cam[:, 0] > 0.1  # At least 10cm in front
+
+        # Convert to standard computer vision camera frame
+        # CARLA camera: X=forward, Y=right, Z=up
+        # Standard CV: X=right, Y=down, Z=forward
+        # CARLA: [X, Y, Z] -> Standard CV: [Y, -Z, X]
+        traj_cam_cv = np.zeros_like(traj_cam)
+        traj_cam_cv[:, 0] = traj_cam[:, 1]   # Y_carla -> X_cv (right)
+        traj_cam_cv[:, 1] = -traj_cam[:, 2]  # -Z_carla -> Y_cv (down)
+        traj_cam_cv[:, 2] = traj_cam[:, 0]   # X_carla -> Z_cv (forward/depth)
+
+        # Project using pinhole camera model
+        # [u, v, 1]^T = (1/Z) * K * [X, Y, Z]^T
+        points_2d = np.zeros((traj_cam_cv.shape[0], 2))
+
+        for i in range(traj_cam_cv.shape[0]):
+            if valid_mask[i] and traj_cam_cv[i, 2] > 0:
+                point_3d = traj_cam_cv[i]
+                point_2d_homo = self.K @ point_3d
+                points_2d[i] = point_2d_homo[:2] / point_2d_homo[2]
+            else:
+                points_2d[i] = [-1, -1]  # Invalid point marker
+
+        return points_2d, valid_mask
+
+    def _draw_trajectory_on_image(self, image: np.ndarray, trajectory_local: np.ndarray) -> np.ndarray:
+        """Draw predicted trajectory on camera image.
+
+        Args:
+            image: Camera image (H, W, 3) in RGB format
+            trajectory_local: Trajectory in ego vehicle local frame (N, 3)
+
+        Returns:
+            Image with trajectory drawn (H, W, 3) in RGB format
+        """
+        if trajectory_local is None or len(trajectory_local) == 0:
+            return image
+
+        # Convert RGB to BGR for OpenCV
+        img_bgr = cv2.cvtColor(image, cv2.COLOR_RGB2BGR)
+
+        # Project trajectory to image
+        points_2d, valid_mask = self._project_trajectory_to_image(trajectory_local)
+
+        if points_2d.shape[0] == 0:
+            return image
+
+        # Draw trajectory as connected line segments
+        prev_point = None
+        for i, (point, valid) in enumerate(zip(points_2d, valid_mask)):
+            if not valid:
+                prev_point = None
+                continue
+
+            u, v = int(point[0]), int(point[1])
+
+            # Check if point is within image bounds
+            if 0 <= u < self.image_width and 0 <= v < self.image_height:
+                # Draw point
+                cv2.circle(img_bgr, (u, v), 3, (0, 255, 0), -1)  # Green circle
+
+                # Draw line from previous point
+                if prev_point is not None:
+                    prev_u, prev_v = int(prev_point[0]), int(prev_point[1])
+                    if 0 <= prev_u < self.image_width and 0 <= prev_v < self.image_height:
+                        cv2.line(img_bgr, (prev_u, prev_v), (u, v), (0, 255, 0), 2)  # Green line
+
+                prev_point = point
+            else:
+                prev_point = None
+
+        # Convert back to RGB
+        img_rgb = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2RGB)
+        return img_rgb
 
     def update(self, world_snapshot: Any, camera_images: dict[str, np.ndarray]) -> None:
         """Update controller state and compute control commands.
@@ -91,6 +265,36 @@ class AlpamayoController:
         # Apply control EVERY frame (using latest prediction from model)
         # This allows smooth control at simulation rate (20Hz) while inference runs at 10Hz
         self._apply_control()
+
+        # Save visualization video
+        if self.save_video and self.video_writer is not None:
+            self._save_visualization_frame(camera_images)
+
+    def _save_visualization_frame(self, camera_images: dict[str, np.ndarray]) -> None:
+        """Save current frame with trajectory visualization to video.
+
+        Args:
+            camera_images: Dictionary mapping camera names to RGB images
+        """
+        # Get front wide camera image
+        front_image = camera_images.get("camera_front_wide_120fov")
+        if front_image is None:
+            return
+
+        # Draw trajectory on image if available
+        if self.predicted_trajectory is not None and len(self.predicted_trajectory) > 0:
+            visualized_image = self._draw_trajectory_on_image(
+                front_image,
+                self.predicted_trajectory
+            )
+        else:
+            visualized_image = front_image
+
+        # Convert RGB to BGR for OpenCV
+        frame_bgr = cv2.cvtColor(visualized_image, cv2.COLOR_RGB2BGR)
+
+        # Write frame to video
+        self.video_writer.write(frame_bgr)
 
     def _update_ego_state(self) -> None:
         """Update ego vehicle state history."""
@@ -401,3 +605,14 @@ class AlpamayoController:
             transform = self.ego_vehicle.get_transform()
             location = transform.location
             return np.array([location.x, location.y, location.z])
+
+    def close(self) -> None:
+        """Clean up resources (close video writer)."""
+        if self.video_writer is not None:
+            self.video_writer.release()
+            print(f"Video saved to: {self.video_path}")
+            self.video_writer = None
+
+    def __del__(self) -> None:
+        """Destructor to ensure video writer is closed."""
+        self.close()

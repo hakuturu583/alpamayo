@@ -30,6 +30,7 @@ dev = [
 ]
 carla = [
   "carla>=0.9.15",
+  "opencv-python>=4.10.0",
   "tqdm>=4.67.1",
 ]
 
