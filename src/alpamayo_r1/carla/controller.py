@@ -88,6 +88,10 @@ class AlpamayoController:
 
     def _init_vehicle_control(self) -> None:
         """Initialize vehicle control settings (gear, handbrake, etc.)."""
+        # Disable autopilot to ensure manual control
+        self.ego_vehicle.set_autopilot(False)
+        print("Autopilot disabled for ego vehicle")
+
         # Create initial control to set up vehicle
         initial_control = carla.VehicleControl()
         initial_control.manual_gear_shift = False  # Use automatic transmission
@@ -577,13 +581,21 @@ class AlpamayoController:
         control.steer = float(steering)
         control.brake = float(brake)
 
-        # Debug output
+        # Get vehicle state for debugging
+        vehicle_transform = self.ego_vehicle.get_transform()
+        vehicle_location = vehicle_transform.location
+        vehicle_control_state = self.ego_vehicle.get_control()
+
+        # Debug output with detailed vehicle state
         print(f"[Control] Step: {self.step_count:4d} | "
               f"Target: ({target_x:5.2f}, {target_y:5.2f}) | "
               f"Speed: {current_speed:4.1f}/{self.target_speed:4.1f} m/s | "
+              f"Vel: ({current_velocity.x:5.2f}, {current_velocity.y:5.2f}, {current_velocity.z:5.2f}) | "
+              f"Pos: ({vehicle_location.x:7.2f}, {vehicle_location.y:7.2f}) | "
               f"Throttle: {control.throttle:.3f} | "
               f"Steer: {control.steer:6.3f} | "
-              f"Brake: {control.brake:.3f}")
+              f"Brake: {control.brake:.3f} | "
+              f"Gear: {vehicle_control_state.gear}")
 
         self.ego_vehicle.apply_control(control)
 
