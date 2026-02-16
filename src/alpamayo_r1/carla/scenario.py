@@ -468,60 +468,28 @@ class BaseScenario(ABC):
 
         print(f"Created {len(self.pedestrian_controllers)} controllers, starting AI...")
 
-        # Start controllers first (without setting destinations)
+        # Start controllers with minimal operations to avoid segfaults
+        # AI walkers will automatically wander randomly without explicit destinations
         for i, controller in enumerate(self.pedestrian_controllers):
             try:
                 if controller is None or not controller.is_alive:
                     continue
 
+                # Only start the controller - let AI handle movement automatically
                 controller.start()
 
-                # Tick after each start for stability
-                if (i + 1) % 3 == 0:
-                    self.world.tick()
-                    time.sleep(0.05)
+                # Tick after EVERY start for maximum stability
+                self.world.tick()
+                time.sleep(0.1)  # Longer delay for stability
 
             except Exception as e:
                 print(f"Failed to start controller {i}: {e}")
                 continue
 
-        # Wait for all controllers to fully start
+        # Final wait to ensure all controllers are fully started
         self.world.tick()
-        time.sleep(0.2)
-
-        print("Setting destinations and speeds...")
-
-        # Now set destinations and speeds
-        for i, controller in enumerate(self.pedestrian_controllers):
-            try:
-                if controller is None or not controller.is_alive:
-                    continue
-
-                # Set random destination
-                destination = carla.Location(
-                    x=ego_location.x + np.random.uniform(-spawn_radius, spawn_radius),
-                    y=ego_location.y + np.random.uniform(-spawn_radius, spawn_radius),
-                    z=ego_location.z,
-                )
-                controller.go_to_location(destination)
-
-                # Set speed (limit to reasonable range)
-                speed = float(np.clip(np.random.uniform(1.0, 2.0), 0.5, 3.0))
-                controller.set_max_speed(speed)
-
-                # Tick every few operations
-                if (i + 1) % 3 == 0:
-                    self.world.tick()
-                    time.sleep(0.05)
-
-            except Exception as e:
-                print(f"Failed to set destination for controller {i}: {e}")
-                continue
-
-        # Final ticks to ensure all operations are processed
-        self.world.tick()
-        time.sleep(0.1)
-        self.world.tick()
+        time.sleep(0.3)
 
         print(f"Successfully spawned {len(self.pedestrian_npcs)} pedestrian NPCs with {len(self.pedestrian_controllers)} controllers")
+        print("Pedestrians will wander randomly (no explicit destinations set)")
         return self.pedestrian_npcs, self.pedestrian_controllers
