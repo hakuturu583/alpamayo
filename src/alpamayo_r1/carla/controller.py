@@ -554,9 +554,9 @@ class AlpamayoController:
                     return_extra=True,
                 )
 
-            # Get sampled action from extra
-            sampled_action = extra["sampled_action"]  # (1, 1, 1, 64, 2)
-            sampled_action_tensor = torch.from_numpy(sampled_action[0, 0, 0]).float().to("cuda")  # (64, 2)
+            # Get sampled action from extra (already a Tensor on CPU)
+            sampled_action = extra["sampled_action"]  # (1, 1, 1, 64, 2) Tensor
+            sampled_action_tensor = sampled_action[0, 0, 0].float().to("cuda")  # (64, 2)
 
             # Get current actual speed
             current_velocity = self.ego_vehicle.get_velocity()
