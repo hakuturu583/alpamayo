@@ -380,19 +380,31 @@ class CARLASimulation:
 
             print(f"Running scenario for {num_steps} steps...")
             for step in tqdm(range(num_steps), desc="Simulation", unit="step"):
-                # Tick the world
-                self.world.tick()
-                snapshot = self.world.get_snapshot()
+                try:
+                    # Tick the world
+                    self.world.tick()
+                    snapshot = self.world.get_snapshot()
 
-                # Get camera images
-                images = self.get_camera_images()
+                    # Get camera images
+                    images = self.get_camera_images()
+                    if len(images) == 0:
+                        print(f"Warning: No camera images received at step {step}")
 
-                # Update Alpamayo controller if enabled
-                if scenario.use_alpamayo_control:
-                    scenario.update_controller(snapshot, images)
+                    # Update Alpamayo controller if enabled
+                    if scenario.use_alpamayo_control:
+                        scenario.update_controller(snapshot, images)
 
-                # Run scenario-specific logic
-                scenario.run()
+                    # Run scenario-specific logic
+                    scenario.run()
+
+                except KeyboardInterrupt:
+                    print("\nSimulation interrupted by user")
+                    break
+                except Exception as e:
+                    print(f"\nError at step {step}: {e}")
+                    import traceback
+                    traceback.print_exc()
+                    break
 
         finally:
             print("Cleaning up scenario...")
