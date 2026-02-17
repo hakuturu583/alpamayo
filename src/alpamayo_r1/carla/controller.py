@@ -637,12 +637,24 @@ class AlpamayoController:
         vehicle_location = vehicle_transform.location
         vehicle_control_state = self.ego_vehicle.get_control()
 
-        # Debug output with detailed vehicle state
+        # Get camera state for debugging
+        front_camera = self.cameras.get("camera_front_wide_120fov")
+        if front_camera is not None:
+            camera_transform = front_camera.get_transform()
+            camera_location = camera_transform.location
+            camera_attached = front_camera.is_attached_to(self.ego_vehicle)
+        else:
+            camera_location = None
+            camera_attached = False
+
+        # Debug output with detailed vehicle and camera state
         print(f"[Control] Step: {self.step_count:4d} | "
               f"Target: ({target_x:5.2f}, {target_y:5.2f}) | "
               f"Speed: {current_speed:4.1f}/{self.target_speed:4.1f} m/s | "
               f"Vel: ({current_velocity.x:5.2f}, {current_velocity.y:5.2f}, {current_velocity.z:5.2f}) | "
-              f"Pos: ({vehicle_location.x:7.2f}, {vehicle_location.y:7.2f}) | "
+              f"VehPos: ({vehicle_location.x:7.2f}, {vehicle_location.y:7.2f}) | "
+              f"CamPos: ({camera_location.x:7.2f}, {camera_location.y:7.2f}) | "
+              f"CamAttached: {camera_attached} | "
               f"Throttle: {control.throttle:.3f} | "
               f"Steer: {control.steer:6.3f} | "
               f"Brake: {control.brake:.3f} | "
