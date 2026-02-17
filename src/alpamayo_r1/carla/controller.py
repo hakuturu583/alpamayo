@@ -206,6 +206,24 @@ class AlpamayoController:
         print(f"\n[Mass]")
         print(f"  Total mass:          {physics.mass:.1f} kg")
 
+        # Bounding box (to understand vehicle origin)
+        bbox = self.ego_vehicle.bounding_box
+        print(f"\n[Bounding Box & Vehicle Origin]")
+        print(f"  Extent (half-size):  x={bbox.extent.x:.3f}m, y={bbox.extent.y:.3f}m, z={bbox.extent.z:.3f}m")
+        print(f"  BBox center offset:  x={bbox.location.x:.3f}m, y={bbox.location.y:.3f}m, z={bbox.location.z:.3f}m")
+        print(f"  Full length:         {bbox.extent.x * 2:.3f}m")
+        print(f"  Full width:          {bbox.extent.y * 2:.3f}m")
+        print(f"  Full height:         {bbox.extent.z * 2:.3f}m")
+        print(f"\n  Note: CARLA vehicle origin is at actor transform position.")
+        print(f"  Note: BBox center offset shows where geometric center is relative to origin.")
+        print(f"  Note: If BBox offset.x > 0, origin is behind geometric center (typical).")
+        print(f"  Note: Unicycle model typically assumes origin at REAR AXLE center.")
+        if bbox.location.x > 0.1:
+            rear_axle_to_origin = bbox.location.x - bbox.extent.x
+            print(f"\n  ⚠ Vehicle origin appears to be {bbox.location.x:.3f}m forward of rear bumper.")
+            print(f"  ⚠ Rear axle is approximately at x={rear_axle_to_origin:.3f}m from vehicle origin.")
+            print(f"  ⚠ This may cause trajectory offset issues if model expects rear axle origin!")
+
         print("\n" + "="*80)
         print("CARLA VEHICLE CONTROL INPUT RANGES")
         print("="*80)
@@ -352,6 +370,19 @@ class AlpamayoController:
 
         # Project trajectory to image
         points_2d, valid_mask = self._project_trajectory_to_image(trajectory_local)
+
+        # Draw vehicle origin marker (ego coordinate system origin)
+        # This helps visualize if there's an offset issue
+        origin_local = np.array([[0.0, 0.0, 0.0]])  # Vehicle origin in local frame
+        origin_2d, origin_valid = self._project_trajectory_to_image(origin_local)
+        if origin_valid[0]:
+            u_origin, v_origin = int(origin_2d[0, 0]), int(origin_2d[0, 1])
+            if 0 <= u_origin < self.image_width and 0 <= v_origin < self.image_height:
+                # Draw large cross marker for origin
+                cv2.drawMarker(img_bgr, (u_origin, v_origin), (255, 0, 255),  # Magenta
+                              cv2.MARKER_CROSS, 30, 3)
+                cv2.putText(img_bgr, "EGO ORIGIN", (u_origin + 20, v_origin - 10),
+                           cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 0, 255), 2)
 
         if points_2d.shape[0] == 0:
             # Add HUD even if no trajectory
