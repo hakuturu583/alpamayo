@@ -68,9 +68,6 @@ class AlpamayoController:
         self.max_speed = 15.0  # m/s (about 54 km/h)
         self.max_steering = 0.8  # radians
 
-        # Trajectory-based speed control
-        self._smoothed_target_speed = None  # EMA state for speed smoothing
-
         # State tracking
         self.ego_history_xyz = []
         self.ego_history_rot = []
@@ -356,12 +353,9 @@ class AlpamayoController:
                     (20, y_offset), font, font_scale, (0, 255, 255), font_thickness)
 
         y_offset += line_height
-        if self._smoothed_target_speed is not None:
-            cv2.putText(image_bgr, f"Trajectory Speed: {self._smoothed_target_speed:.1f} m/s",
-                        (20, y_offset), font, font_scale, (0, 255, 255), font_thickness)
-        else:
-            cv2.putText(image_bgr, f"Trajectory Speed: N/A",
-                        (20, y_offset), font, font_scale, (0, 255, 255), font_thickness)
+        speed_limit = self._get_carla_speed_limit()
+        cv2.putText(image_bgr, f"Speed Limit: {speed_limit:.1f} m/s ({speed_limit*3.6:.0f} km/h)",
+                    (20, y_offset), font, font_scale, (0, 255, 255), font_thickness)
 
         # Add Bird's Eye View (BEV) of trajectory in top-right corner
         if self.predicted_trajectory is not None and len(self.predicted_trajectory) > 0:
@@ -727,142 +721,21 @@ class AlpamayoController:
         trajectory[:, 0] = np.linspace(0, 10, T)  # 10m forward
         return trajectory
 
-    def _calculate_trajectory_speed(self, trajectory: np.ndarray, dt: float = 0.1) -> tuple[np.ndarray, float]:
-        """Calculate speed profile from waypoint trajectory using finite differences.
-
-        隣接waypoint間の距離をdtで割って瞬時速度を計算する。
-        XY平面のみを使用（Z軸は無視）。
-
-        Args:
-            trajectory: (N, 3) array [x_forward, y_lateral, z_up] in ego local frame
-            dt: Time interval between waypoints (0.1s)
+    def _get_carla_speed_limit(self) -> float:
+        """Get speed limit at current ego vehicle location from CARLA API.
 
         Returns:
-            speeds: (N,) array of speeds at each waypoint [m/s]
-            immediate_speed: Speed at first waypoint (current target) [m/s]
+            speed_limit: Speed limit in m/s
         """
-        # XY平面の2D位置のみを使用
-        positions_2d = trajectory[:, :2]  # (N, 2)
+        speed_limit_kmh = self.ego_vehicle.get_speed_limit()
+        speed_limit_ms = speed_limit_kmh / 3.6
 
-        # 隣接点間の変位を計算
-        deltas = np.diff(positions_2d, axis=0)  # (N-1, 2)
+        speed_limit_ms = min(speed_limit_ms, self.max_speed)
 
-        # 距離を計算
-        distances = np.linalg.norm(deltas, axis=1)  # (N-1,)
+        if self.step_count % 20 == 0:
+            print(f"[Speed Limit] {speed_limit_kmh:.0f} km/h ({speed_limit_ms:.1f} m/s)")
 
-        # 速度 = 距離 / 時間
-        speeds_between = distances / dt  # (N-1,)
-
-        # waypoint位置での速度を補間（中点近似）
-        speeds = np.zeros(len(trajectory))
-        speeds[0] = speeds_between[0]
-        speeds[1:-1] = (speeds_between[:-1] + speeds_between[1:]) / 2
-        speeds[-1] = speeds_between[-1]
-
-        return speeds, speeds[0]
-
-    def _update_target_speed_ema(self, new_speed: float, alpha: float = 0.3) -> float:
-        """Apply exponential moving average to target speed across control cycles.
-
-        推論は10Hz、制御は20Hzなので、制御サイクル間で速度を補間する。
-
-        Args:
-            new_speed: New target speed from trajectory [m/s]
-            alpha: Smoothing factor (0.2-0.4 recommended)
-                   Lower = smoother, Higher = more responsive
-
-        Returns:
-            smoothed_speed: Updated target speed [m/s]
-        """
-        if not hasattr(self, '_smoothed_target_speed') or self._smoothed_target_speed is None:
-            self._smoothed_target_speed = new_speed
-            return new_speed
-
-        # EMA: smooth[t] = alpha * new + (1-alpha) * smooth[t-1]
-        self._smoothed_target_speed = alpha * new_speed + (1 - alpha) * self._smoothed_target_speed
-
-        return self._smoothed_target_speed
-
-    def _calculate_trajectory_target_speed(self) -> float:
-        """Calculate target speed from predicted trajectory with error handling.
-
-        もっと先の区間（1-2秒先、10-20番目のwaypoint）の平均速度を使用して、
-        現在の速度による予測バイアスを回避する。
-
-        Returns:
-            target_speed: Target speed for current control cycle [m/s]
-        """
-        # エッジケース1: trajectory無し
-        if self.predicted_trajectory is None or len(self.predicted_trajectory) == 0:
-            # デフォルト速度を返す
-            return 5.0
-
-        # エッジケース2: 短すぎるtrajectory
-        if len(self.predicted_trajectory) < 15:
-            return 5.0
-
-        try:
-            # ===== 停止意図の判定 =====
-            # 2秒先のwaypointが原点から近ければ停止/減速意図
-            final_idx = min(19, len(self.predicted_trajectory) - 1)  # 2秒先
-            final_waypoint = self.predicted_trajectory[final_idx, :2]  # X, Y座標
-            distance_to_final = np.linalg.norm(final_waypoint)
-
-            # 5m未満なら停止意図（通常5.0 m/sで2秒走れば10m進むはず）
-            is_stopping = distance_to_final < 5.0
-
-            # もっと先の区間を使用（10-20番目 = 1-2秒先）
-            # これにより「今は遅いけど先では速い」という情報を捉える
-            start_idx = 10  # 1秒先
-            end_idx = min(20, len(self.predicted_trajectory))  # 2秒先
-            trajectory_subset = self.predicted_trajectory[start_idx:end_idx]
-
-            # この区間の平均速度を計算
-            positions_2d = trajectory_subset[:, :2]
-            deltas = np.diff(positions_2d, axis=0)
-            distances = np.linalg.norm(deltas, axis=1)
-            total_distance = np.sum(distances)
-            time_span = (end_idx - start_idx - 1) * 0.1  # 秒
-
-            if time_span > 0:
-                avg_speed = total_distance / time_span
-            else:
-                avg_speed = 0.0
-
-            # デバッグ出力
-            if self.step_count % 10 == 0:
-                print(f"[Speed Debug] Trajectory analysis:")
-                print(f"  Final waypoint[{final_idx}]: ({final_waypoint[0]:.3f}, {final_waypoint[1]:.3f})")
-                print(f"  Distance to final: {distance_to_final:.3f} m")
-                print(f"  Is stopping: {is_stopping}")
-                print(f"  Avg speed (calculated): {avg_speed:.2f} m/s")
-
-            # ===== 条件付き最小速度 =====
-            if is_stopping:
-                # 停止意図 → 最小速度を適用せず、計算された速度をそのまま使う
-                target_speed = avg_speed
-            else:
-                # 走行意図 → 最小速度を保証（静止状態から脱出）
-                min_speed = 3.0  # m/s
-                target_speed = max(avg_speed, min_speed)
-
-            # 安全範囲にクランプ (0.0 ~ max_speed)
-            target_speed = np.clip(target_speed, 0.0, self.max_speed)
-
-            # EMAで平滑化
-            smoothed_speed = self._update_target_speed_ema(target_speed, alpha=0.3)
-
-            if self.step_count % 10 == 0:
-                print(f"  Target speed (final): {target_speed:.2f} m/s")
-                print(f"  Smoothed speed: {smoothed_speed:.2f} m/s")
-
-            return smoothed_speed
-
-        except Exception as e:
-            print(f"[Warning] Speed calculation failed: {e}, using default speed")
-            import traceback
-            traceback.print_exc()
-            return 5.0
+        return speed_limit_ms
 
     def _apply_control(self) -> None:
         """Apply control commands based on predicted trajectory."""
@@ -871,10 +744,10 @@ class AlpamayoController:
             self._apply_simple_control()
             return
 
-        # ===== 新規: trajectory-based target speedを計算 =====
-        current_target_speed = self._calculate_trajectory_target_speed()
+        # ===== CARLA速度制限を取得 =====
+        target_speed = self._get_carla_speed_limit()
 
-        # ===== 既存: 横方向制御（変更なし） =====
+        # ===== 横方向制御 =====
         # Get near-term target point (e.g., 1 second ahead at 10Hz = 10th point)
         lookahead_idx = min(10, len(self.predicted_trajectory) - 1)
         target_point = self.predicted_trajectory[lookahead_idx]
@@ -890,14 +763,14 @@ class AlpamayoController:
         steering_gain = 0.5
         steering = np.clip(steering_gain * lateral_error, -self.max_steering, self.max_steering)
 
-        # ===== 修正: 速度制御でtrajectory speedを使用 =====
-        # Calculate throttle based on desired speed
+        # ===== 速度制御 =====
+        # Calculate throttle based on speed limit
         current_velocity = self.ego_vehicle.get_velocity()
         current_speed = np.sqrt(
             current_velocity.x**2 + current_velocity.y**2 + current_velocity.z**2
         )
 
-        speed_error = current_target_speed - current_speed  # trajectory speedを使用
+        speed_error = target_speed - current_speed
         throttle = np.clip(0.5 * speed_error, 0.0, 1.0)
         brake = 0.0 if speed_error > -0.5 else 0.3
 
@@ -938,10 +811,10 @@ class AlpamayoController:
             camera_location = None
             camera_attached = False
 
-        # Debug output with trajectory speed
+        # Debug output
         print(f"[Control] Step: {self.step_count:4d} | "
               f"Target: ({target_x:5.2f}, {target_y:5.2f}) | "
-              f"Speed: {current_speed:4.1f}/{current_target_speed:4.1f} m/s | "
+              f"Speed: {current_speed:4.1f}/{target_speed:4.1f} m/s | "
               f"Throttle: {control.throttle:.3f} | "
               f"Steer: {control.steer:6.3f} | "
               f"Brake: {control.brake:.3f}")
@@ -955,8 +828,9 @@ class AlpamayoController:
             current_velocity.x**2 + current_velocity.y**2 + current_velocity.z**2
         )
 
-        default_speed = 5.0  # デフォルト速度を明示
-        speed_error = default_speed - current_speed
+        # Get speed limit from CARLA
+        target_speed = self._get_carla_speed_limit()
+        speed_error = target_speed - current_speed
         throttle = np.clip(0.5 * speed_error, 0.0, 1.0)
 
         control = carla.VehicleControl()
@@ -977,7 +851,7 @@ class AlpamayoController:
 
         # Debug output
         print(f"[Control-Simple] Step: {self.step_count:4d} | "
-              f"Speed: {current_speed:4.1f}/{default_speed:4.1f} m/s | "
+              f"Speed: {current_speed:4.1f}/{target_speed:4.1f} m/s | "
               f"Throttle: {control.throttle:.3f} | "
               f"(No trajectory available)")
 
