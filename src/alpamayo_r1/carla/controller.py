@@ -174,7 +174,9 @@ class AlpamayoController:
         # Compare with Unicycle model parameters
         if self.model is not None:
             action_space = self.model.action_space
-            curv_bounds = action_space.curvature_bounds.cpu().float().numpy()
+            # bounds are tuples/lists (or OmegaConf ListConfig), not Tensors
+            curv_bounds = np.array(action_space.curvature_bounds)
+            # std/mean are Tensors
             curv_std = action_space.curvature_std.cpu().float().item()
             curv_mean = action_space.curvature_mean.cpu().float().item()
 
@@ -186,7 +188,7 @@ class AlpamayoController:
             print(f"\n  Note: Small std={curv_std:.4f} means normalized outputs need scaling!")
 
             # Check acceleration parameters too
-            accel_bounds = action_space.accel_bounds.cpu().float().numpy()
+            accel_bounds = np.array(action_space.accel_bounds)
             accel_std = action_space.accel_std.cpu().float().item()
             accel_mean = action_space.accel_mean.cpu().float().item()
 
