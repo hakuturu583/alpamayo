@@ -558,6 +558,24 @@ class AlpamayoController:
             sampled_action = extra["sampled_action"]  # (1, 1, 1, 64, 2) Tensor
             sampled_action_tensor = sampled_action[0, 0, 0].float().to("cuda")  # (64, 2)
 
+            # Debug: Print normalized action statistics
+            accel_normalized = sampled_action_tensor[:, 0].cpu().numpy()
+            curvature_normalized = sampled_action_tensor[:, 1].cpu().numpy()
+
+            # Denormalize to get real values
+            accel_std = self.model.action_space.accel_std.cpu().numpy()
+            accel_mean = self.model.action_space.accel_mean.cpu().numpy()
+            curv_std = self.model.action_space.curvature_std.cpu().numpy()
+            curv_mean = self.model.action_space.curvature_mean.cpu().numpy()
+
+            accel_real = accel_normalized * accel_std + accel_mean
+            curvature_real = curvature_normalized * curv_std + curv_mean
+
+            print(f"[Action] Normalized - Accel: [{accel_normalized.min():.2f}, {accel_normalized.max():.2f}], "
+                  f"Curvature: [{curvature_normalized.min():.2f}, {curvature_normalized.max():.2f}]")
+            print(f"[Action] Real - Accel: [{accel_real.min():.3f}, {accel_real.max():.3f}] m/s², "
+                  f"Curvature: [{curvature_real.min():.4f}, {curvature_real.max():.4f}] 1/m (radius: {1/max(abs(curvature_real.min()), abs(curvature_real.max())):.1f}m)")
+
             # Get current actual speed
             current_velocity = self.ego_vehicle.get_velocity()
             current_speed = np.sqrt(
