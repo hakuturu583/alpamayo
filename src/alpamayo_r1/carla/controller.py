@@ -766,10 +766,9 @@ class AlpamayoController:
             sampled_action = extra["sampled_action"]  # (1, 1, 1, 64, 2) Tensor
             sampled_action_tensor = sampled_action[0, 0, 0].float().to("cuda")  # (64, 2)
 
-            # Curvature scaling disabled (using model output as-is)
-            # Note: Previously scaled to compensate for small curvature_std (0.026)
-            # Now testing with coordinate offset correction only
-            curvature_scale = 1.0
+            # Scale curvature to compensate for small curvature_std (0.026)
+            # Empirically tuned to 5x for balanced steering response
+            curvature_scale = 5.0
             sampled_action_tensor[:, 1] *= curvature_scale
 
             # Debug: Print action statistics (before scaling)
@@ -785,12 +784,12 @@ class AlpamayoController:
             accel_real = accel_normalized * accel_std + accel_mean
             curvature_real_original = curvature_normalized_original * curv_std + curv_mean
 
-            # Curvature after scaling (currently 1.0x = no scaling)
+            # Curvature after scaling (5x)
             curvature_normalized_scaled = sampled_action_tensor[:, 1].cpu().numpy()
             curvature_real_scaled = curvature_normalized_scaled * curv_std + curv_mean
 
             print(f"[Action] Accel: [{accel_real.min():.3f}, {accel_real.max():.3f}] m/s²")
-            print(f"[Action] Curvature: [{curvature_real_scaled.min():.4f}, {curvature_real_scaled.max():.4f}] 1/m "
+            print(f"[Action] Curvature (scaled 5x): [{curvature_real_scaled.min():.4f}, {curvature_real_scaled.max():.4f}] 1/m "
                   f"-> radius: {1/max(abs(curvature_real_scaled.min()), abs(curvature_real_scaled.max()), 1e-6):.1f}m")
 
             # Get current actual speed
