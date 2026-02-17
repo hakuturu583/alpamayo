@@ -560,8 +560,8 @@ class AlpamayoController:
 
             # Scale curvature to make trajectories more curved
             # Model's curvature_std is 0.026, which is too small
-            # Scale by 3-4x to get more reasonable steering
-            curvature_scale = 3.5
+            # Scale by 10x to get sharper steering for urban driving
+            curvature_scale = 10.0
             sampled_action_tensor[:, 1] *= curvature_scale
 
             # Debug: Print action statistics (before scaling)
@@ -584,7 +584,7 @@ class AlpamayoController:
             print(f"[Action] Accel: [{accel_real.min():.3f}, {accel_real.max():.3f}] m/s²")
             print(f"[Action] Curvature (original): [{curvature_real_original.min():.4f}, {curvature_real_original.max():.4f}] 1/m "
                   f"-> radius: {1/max(abs(curvature_real_original.min()), abs(curvature_real_original.max()), 1e-6):.1f}m")
-            print(f"[Action] Curvature (scaled 3.5x): [{curvature_real_scaled.min():.4f}, {curvature_real_scaled.max():.4f}] 1/m "
+            print(f"[Action] Curvature (scaled 10x): [{curvature_real_scaled.min():.4f}, {curvature_real_scaled.max():.4f}] 1/m "
                   f"-> radius: {1/max(abs(curvature_real_scaled.min()), abs(curvature_real_scaled.max()), 1e-6):.1f}m")
 
             # Get current actual speed
