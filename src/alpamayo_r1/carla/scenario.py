@@ -426,113 +426,152 @@ class BaseScenario(ABC):
     ) -> tuple[list[Any], list[Any]]:
         """Spawn pedestrian NPCs with AI walker controllers.
 
+        CURRENT STATUS: DISABLED due to libcarla WalkerManager bug
+
+        BUG REPORT:
+        libcarla's WalkerManager has an infinite recursion bug that causes segmentation faults.
+        The bug occurs in the following call chain:
+          - carla::nav::WalkerManager::SetWalkerNextPoint(walker_id)
+          - carla::nav::WalkerManager::SetWalkerRoute(walker_id) [no destination]
+          - carla::nav::Navigation::GetAgentRoute(walker_id)
+          - [loops back to SetWalkerRoute infinitely]
+
+        This eventually causes a stack overflow crash in dtClosestHeightPointTriangle
+        (Detour NavMesh library) at approximately 130-148 simulation steps.
+
+        Root cause: When WalkerManager tries to set a new route for a walker without
+        an explicit destination, it enters an infinite recursion loop between
+        SetWalkerRoute and GetAgentRoute.
+
+        Observed behavior:
+        - Crash occurs consistently at ~130-148 steps with pedestrians enabled
+        - No crash when num_pedestrians = 0
+        - GDB backtrace shows infinite recursion for specific Walker IDs (e.g., 6868)
+
+        TODO: Re-enable pedestrian spawning after:
+        1. CARLA version upgrade that fixes WalkerManager bug, OR
+        2. Implement custom pedestrian movement without relying on WalkerManager's
+           automatic pathfinding (e.g., manual velocity control), OR
+        3. Report bug to CARLA team and wait for fix
+
         Args:
-            num_pedestrians: Number of pedestrians to spawn
-            spawn_radius: Radius around ego vehicle for spawning (in meters)
+            num_pedestrians: Number of pedestrians to spawn (currently ignored)
+            spawn_radius: Radius around ego vehicle for spawning (currently ignored)
 
         Returns:
-            Tuple of (pedestrian actors, controller actors)
+            Tuple of (empty list, empty list) - no pedestrians spawned
         """
-        import carla
-        import numpy as np
-        import time
+        print(
+            f"WARNING: Pedestrian spawning is disabled due to libcarla WalkerManager bug"
+        )
+        print(
+            f"  Requested {num_pedestrians} pedestrians, but returning 0 to avoid segfault"
+        )
+        return [], []
 
-        if self.ego_vehicle is None:
-            print("Warning: Ego vehicle must be spawned before pedestrians")
-            return [], []
-
-        blueprint_library = self.world.get_blueprint_library()
-        walker_bps = blueprint_library.filter("walker.pedestrian.*")
-        controller_bp = blueprint_library.find("controller.ai.walker")
-
-        ego_location = self.ego_vehicle.get_location()
-
-        print(f"Spawning {num_pedestrians} pedestrians...")
-
-        # Spawn pedestrians with safety checks
-        spawn_batch = []
-        for i in range(num_pedestrians):
-            spawn_transform = carla.Transform()
-            spawn_transform.location = carla.Location(
-                x=ego_location.x + np.random.uniform(-spawn_radius, spawn_radius),
-                y=ego_location.y + np.random.uniform(-spawn_radius, spawn_radius),
-                z=ego_location.z + 1.0,  # Slightly higher to avoid ground collision
-            )
-
-            walker_bp = np.random.choice(walker_bps)
-
-            try:
-                pedestrian = self.world.try_spawn_actor(walker_bp, spawn_transform)
-                if pedestrian is not None:
-                    self.pedestrian_npcs.append(pedestrian)
-                    spawn_batch.append(pedestrian)
-
-                    # Tick every few spawns to help CARLA process
-                    if (i + 1) % 5 == 0:
-                        self.world.tick()
-
-            except Exception as e:
-                print(f"Failed to spawn pedestrian {i}: {e}")
-                continue
-
-        # Final tick to register all pedestrians
-        self.world.tick()
-        time.sleep(0.1)  # Small delay for stability
-
-        if len(self.pedestrian_npcs) == 0:
-            print("No pedestrians spawned")
-            return [], []
-
-        print(f"Spawned {len(self.pedestrian_npcs)} pedestrians, creating controllers...")
-
-        # Spawn controllers with safety checks
-        for i, pedestrian in enumerate(self.pedestrian_npcs):
-            try:
-                if pedestrian is None or not pedestrian.is_alive:
-                    continue
-
-                controller = self.world.try_spawn_actor(
-                    controller_bp, carla.Transform(), pedestrian
-                )
-                if controller is not None:
-                    self.pedestrian_controllers.append(controller)
-
-                    # Tick every few spawns
-                    if (i + 1) % 5 == 0:
-                        self.world.tick()
-
-            except Exception as e:
-                print(f"Failed to spawn controller for pedestrian {i}: {e}")
-                continue
-
-        # Final tick to register all controllers
-        self.world.tick()
-        time.sleep(0.1)  # Small delay for stability
-
-        print(f"Created {len(self.pedestrian_controllers)} controllers, starting AI...")
-
-        # Start controllers with minimal operations to avoid segfaults
-        # AI walkers will automatically wander randomly without explicit destinations
-        for i, controller in enumerate(self.pedestrian_controllers):
-            try:
-                if controller is None or not controller.is_alive:
-                    continue
-
-                # Only start the controller - let AI handle movement automatically
-                controller.start()
-
-                # Tick after EVERY start for maximum stability
-                self.world.tick()
-                time.sleep(0.1)  # Longer delay for stability
-
-            except Exception as e:
-                print(f"Failed to start controller {i}: {e}")
-                continue
-
-        # Final wait to ensure all controllers are fully started
-        self.world.tick()
-        time.sleep(0.3)
-
-        print(f"Successfully spawned {len(self.pedestrian_npcs)} pedestrian NPCs with {len(self.pedestrian_controllers)} controllers")
-        print("Pedestrians will wander randomly (no explicit destinations set)")
-        return self.pedestrian_npcs, self.pedestrian_controllers
+        # ============================================================================
+        # ORIGINAL CODE - COMMENTED OUT DUE TO libcarla BUG
+        # ============================================================================
+        # import carla
+        # import numpy as np
+        # import time
+        #
+        # if self.ego_vehicle is None:
+        #     print("Warning: Ego vehicle must be spawned before pedestrians")
+        #     return [], []
+        #
+        # blueprint_library = self.world.get_blueprint_library()
+        # walker_bps = blueprint_library.filter("walker.pedestrian.*")
+        # controller_bp = blueprint_library.find("controller.ai.walker")
+        #
+        # ego_location = self.ego_vehicle.get_location()
+        #
+        # print(f"Spawning {num_pedestrians} pedestrians...")
+        #
+        # # Spawn pedestrians with safety checks
+        # spawn_batch = []
+        # for i in range(num_pedestrians):
+        #     spawn_transform = carla.Transform()
+        #     spawn_transform.location = carla.Location(
+        #         x=ego_location.x + np.random.uniform(-spawn_radius, spawn_radius),
+        #         y=ego_location.y + np.random.uniform(-spawn_radius, spawn_radius),
+        #         z=ego_location.z + 1.0,  # Slightly higher to avoid ground collision
+        #     )
+        #
+        #     walker_bp = np.random.choice(walker_bps)
+        #
+        #     try:
+        #         pedestrian = self.world.try_spawn_actor(walker_bp, spawn_transform)
+        #         if pedestrian is not None:
+        #             self.pedestrian_npcs.append(pedestrian)
+        #             spawn_batch.append(pedestrian)
+        #
+        #             # Tick every few spawns to help CARLA process
+        #             if (i + 1) % 5 == 0:
+        #                 self.world.tick()
+        #
+        #     except Exception as e:
+        #         print(f"Failed to spawn pedestrian {i}: {e}")
+        #         continue
+        #
+        # # Final tick to register all pedestrians
+        # self.world.tick()
+        # time.sleep(0.1)  # Small delay for stability
+        #
+        # if len(self.pedestrian_npcs) == 0:
+        #     print("No pedestrians spawned")
+        #     return [], []
+        #
+        # print(f"Spawned {len(self.pedestrian_npcs)} pedestrians, creating controllers...")
+        #
+        # # Spawn controllers with safety checks
+        # for i, pedestrian in enumerate(self.pedestrian_npcs):
+        #     try:
+        #         if pedestrian is None or not pedestrian.is_alive:
+        #             continue
+        #
+        #         controller = self.world.try_spawn_actor(
+        #             controller_bp, carla.Transform(), pedestrian
+        #         )
+        #         if controller is not None:
+        #             self.pedestrian_controllers.append(controller)
+        #
+        #             # Tick every few spawns
+        #             if (i + 1) % 5 == 0:
+        #                 self.world.tick()
+        #
+        #     except Exception as e:
+        #         print(f"Failed to spawn controller for pedestrian {i}: {e}")
+        #         continue
+        #
+        # # Final tick to register all controllers
+        # self.world.tick()
+        # time.sleep(0.1)  # Small delay for stability
+        #
+        # print(f"Created {len(self.pedestrian_controllers)} controllers, starting AI...")
+        #
+        # # Start controllers with minimal operations to avoid segfaults
+        # # AI walkers will automatically wander randomly without explicit destinations
+        # for i, controller in enumerate(self.pedestrian_controllers):
+        #     try:
+        #         if controller is None or not controller.is_alive:
+        #             continue
+        #
+        #         # Only start the controller - let AI handle movement automatically
+        #         controller.start()
+        #
+        #         # Tick after EVERY start for maximum stability
+        #         self.world.tick()
+        #         time.sleep(0.1)  # Longer delay for stability
+        #
+        #     except Exception as e:
+        #         print(f"Failed to start controller {i}: {e}")
+        #         continue
+        #
+        # # Final wait to ensure all controllers are fully started
+        # self.world.tick()
+        # time.sleep(0.3)
+        #
+        # print(f"Successfully spawned {len(self.pedestrian_npcs)} pedestrian NPCs with {len(self.pedestrian_controllers)} controllers")
+        # print("Pedestrians will wander randomly (no explicit destinations set)")
+        # return self.pedestrian_npcs, self.pedestrian_controllers
