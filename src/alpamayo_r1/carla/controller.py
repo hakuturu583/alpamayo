@@ -68,6 +68,11 @@ class AlpamayoController:
         self.max_speed = 15.0  # m/s (about 54 km/h)
         self.max_steering = 0.8  # radians
 
+        # Pure pursuit parameters
+        self.wheelbase = 2.7  # meters
+        self.lookahead_time = 1.5  # seconds
+        self.min_lookahead_distance = 3.0  # meters
+
         # State tracking
         self.ego_history_xyz = []
         self.ego_history_rot = []
@@ -750,32 +755,57 @@ class AlpamayoController:
             self._apply_simple_control()
             return
 
-        # ===== CARLA速度制限を取得 =====
+        # Get speed limit from CARLA
         target_speed = self._get_carla_speed_limit()
 
-        # ===== 横方向制御 =====
-        # Get near-term target point (e.g., 1 second ahead at 10Hz = 10th point)
-        lookahead_idx = min(10, len(self.predicted_trajectory) - 1)
-        target_point = self.predicted_trajectory[lookahead_idx]
-
-        # Calculate steering angle using pure pursuit
-        target_x = target_point[0]
-        target_y = target_point[1]
-
-        # Lateral error
-        lateral_error = target_y
-
-        # Calculate steering angle (simple proportional control)
-        steering_gain = 0.5
-        steering = np.clip(steering_gain * lateral_error, -self.max_steering, self.max_steering)
-
-        # ===== 速度制御 =====
-        # Calculate throttle based on speed limit
+        # Lateral control using Pure Pursuit algorithm
+        # Get current speed for speed-dependent lookahead
         current_velocity = self.ego_vehicle.get_velocity()
         current_speed = np.sqrt(
             current_velocity.x**2 + current_velocity.y**2 + current_velocity.z**2
         )
 
+        # Calculate lookahead distance (speed-dependent)
+        lookahead_distance_desired = max(
+            current_speed * self.lookahead_time,
+            self.min_lookahead_distance
+        )
+
+        # Find waypoint closest to desired lookahead distance
+        best_idx = 0
+        min_diff = float('inf')
+        for i in range(len(self.predicted_trajectory)):
+            wp = self.predicted_trajectory[i]
+            wp_distance = np.sqrt(wp[0]**2 + wp[1]**2)
+            diff = abs(wp_distance - lookahead_distance_desired)
+            if diff < min_diff:
+                min_diff = diff
+                best_idx = i
+
+        target_point = self.predicted_trajectory[best_idx]
+        target_x = target_point[0]
+        target_y = target_point[1]
+
+        # Calculate actual lookahead distance
+        lookahead_distance = np.sqrt(target_x**2 + target_y**2)
+
+        # Pure pursuit: calculate curvature
+        # curvature = 2 * sin(alpha) / L, where sin(alpha) ≈ lateral_error / L
+        # Simplified: curvature = 2 * lateral_error / L^2
+        if lookahead_distance > 0.1:  # Avoid division by zero
+            curvature = 2.0 * target_y / (lookahead_distance**2)
+
+            # Convert curvature to steering angle
+            # steering = atan(wheelbase * curvature)
+            steering = np.arctan(self.wheelbase * curvature)
+
+            # Clamp to max steering
+            steering = np.clip(steering, -self.max_steering, self.max_steering)
+        else:
+            # Too close, go straight
+            steering = 0.0
+
+        # Longitudinal control (speed)
         speed_error = target_speed - current_speed
         throttle = np.clip(0.5 * speed_error, 0.0, 1.0)
         brake = 0.0 if speed_error > -0.5 else 0.3
@@ -819,11 +849,11 @@ class AlpamayoController:
 
         # Debug output
         print(f"[Control] Step: {self.step_count:4d} | "
-              f"Target: ({target_x:5.2f}, {target_y:5.2f}) | "
+              f"WP[{best_idx:2d}]: ({target_x:5.2f}, {target_y:5.2f}) | "
+              f"Lookahead: {lookahead_distance:.1f}m | "
               f"Speed: {current_speed:4.1f}/{target_speed:4.1f} m/s | "
-              f"Throttle: {control.throttle:.3f} | "
-              f"Steer: {control.steer:6.3f} | "
-              f"Brake: {control.brake:.3f}")
+              f"Steer: {control.steer:+.3f} | "
+              f"Throttle: {control.throttle:.3f}")
 
         self.ego_vehicle.apply_control(control)
 
