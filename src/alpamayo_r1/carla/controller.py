@@ -66,10 +66,11 @@ class AlpamayoController:
 
         # Control parameters
         self.max_speed = 15.0  # m/s (about 54 km/h)
-        self.max_steering = 0.8  # radians
+        self.max_steering = 1.222  # radians (70°) - actual CARLA Tesla Model 3 max steer angle
+        # Note: This is unusually large (typical cars: ~30°), but matches CARLA vehicle physics
 
         # Pure pursuit parameters
-        self.wheelbase = 2.7  # meters
+        self.wheelbase = 3.005  # meters - actual CARLA Tesla Model 3 wheelbase
         self.lookahead_time = 1.5  # seconds
         self.min_lookahead_distance = 3.0  # meters
 
