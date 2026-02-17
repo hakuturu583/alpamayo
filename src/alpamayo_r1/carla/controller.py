@@ -66,11 +66,10 @@ class AlpamayoController:
 
         # Control parameters
         self.max_speed = 15.0  # m/s (about 54 km/h)
-        self.max_steering = 1.222  # radians (70°) - actual CARLA Tesla Model 3 max steer angle
-        # Note: This is unusually large (typical cars: ~30°), but matches CARLA vehicle physics
+        self.max_steering = 1.222  # radians (initial/fallback) - will be updated from CARLA physics
 
         # Pure pursuit parameters
-        self.wheelbase = 3.005  # meters - actual CARLA Tesla Model 3 wheelbase
+        self.wheelbase = 3.005  # meters (initial/fallback) - will be updated from CARLA physics
         self.lookahead_time = 1.5  # seconds
         self.min_lookahead_distance = 3.0  # meters
 
@@ -147,30 +146,30 @@ class AlpamayoController:
 
             print(f"\n[Wheelbase]")
             print(f"  CARLA actual:        {actual_wheelbase:.3f} m")
-            print(f"  Controller setting:  {self.wheelbase:.3f} m")
-            print(f"  Difference:          {abs(actual_wheelbase - self.wheelbase):.3f} m ({abs(actual_wheelbase - self.wheelbase) / actual_wheelbase * 100:.1f}%)")
+            print(f"  Initial setting:     {self.wheelbase:.3f} m")
+            if abs(actual_wheelbase - self.wheelbase) > 0.01:
+                print(f"  → Updating to CARLA actual value")
+                self.wheelbase = actual_wheelbase
 
         # Get max steering angle from front wheels and store it for normalization
         if len(wheels) >= 2:
             max_steer_angle_deg = wheels[0].max_steer_angle  # degrees
             max_steer_angle_rad = np.deg2rad(max_steer_angle_deg)
 
-            # Store for use in control normalization
-            self.max_steer_angle_rad = max_steer_angle_rad
-
             print(f"\n[Max Steering Angle]")
-            print(f"  CARLA max:           {max_steer_angle_rad:.3f} rad ({max_steer_angle_deg:.1f} deg)")
-            print(f"  Controller max:      {self.max_steering:.3f} rad ({np.rad2deg(self.max_steering):.1f} deg)")
-            print(f"  Difference:          {abs(max_steer_angle_rad - self.max_steering):.3f} rad ({abs(max_steer_angle_rad - self.max_steering) / max_steer_angle_rad * 100:.1f}%)")
+            print(f"  CARLA actual:        {max_steer_angle_rad:.3f} rad ({max_steer_angle_deg:.1f} deg)")
+            print(f"  Initial setting:     {self.max_steering:.3f} rad ({np.rad2deg(self.max_steering):.1f} deg)")
+            if abs(max_steer_angle_rad - self.max_steering) > 0.01:
+                print(f"  → Updating to CARLA actual value")
+                self.max_steering = max_steer_angle_rad
+                self.max_steer_angle_rad = max_steer_angle_rad
 
-            # Calculate max curvature achievable with CARLA's max steering
-            if actual_wheelbase > 0:
-                carla_max_curvature = np.tan(max_steer_angle_rad) / actual_wheelbase
-                controller_max_curvature = np.tan(self.max_steering) / self.wheelbase
+            # Calculate max curvature achievable with actual steering
+            # After updates above, controller now uses CARLA actual values
+            max_curvature = np.tan(self.max_steering) / self.wheelbase
 
-                print(f"\n[Max Curvature (from steering)]")
-                print(f"  CARLA max:           {carla_max_curvature:.4f} (1/m) -> min radius: {1/carla_max_curvature:.1f} m")
-                print(f"  Controller max:      {controller_max_curvature:.4f} (1/m) -> min radius: {1/controller_max_curvature:.1f} m")
+            print(f"\n[Max Curvature (from steering)]")
+            print(f"  Vehicle capability:  {max_curvature:.4f} (1/m) -> min radius: {1/max_curvature:.1f} m")
 
         # Compare with Unicycle model parameters
         if self.model is not None:
