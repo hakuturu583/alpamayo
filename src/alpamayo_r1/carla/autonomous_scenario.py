@@ -100,12 +100,6 @@ def main():
         help="Disable model loading and use rule-based controller only",
     )
     parser.add_argument(
-        "--target-speed",
-        type=float,
-        default=5.0,
-        help="Target speed in m/s (default: 5.0 m/s = 18 km/h)",
-    )
-    parser.add_argument(
         "--no-video",
         action="store_true",
         help="Disable video recording to test if it causes segfault",
@@ -125,7 +119,6 @@ def main():
     print(f"  Vehicle NPCs: {args.num_vehicles}")
     print(f"  Pedestrian NPCs: {args.num_pedestrians}")
     print(f"  Simulation steps: {args.num_steps}")
-    print(f"  Target speed: {args.target_speed} m/s ({args.target_speed * 3.6:.1f} km/h)")
     print(f"  Random seed: {args.seed}")
 
     # Load model unless --no-model is specified
@@ -213,10 +206,6 @@ def main():
 
         # Store save_video setting for controller initialization
         scenario.save_video = not args.no_video
-
-        # Set target speed if controller is initialized
-        if scenario.alpamayo_controller is not None:
-            scenario.alpamayo_controller.set_target_speed(args.target_speed)
 
         # Run scenario
         print(f"Running autonomous driving scenario for {args.num_steps} steps...")
