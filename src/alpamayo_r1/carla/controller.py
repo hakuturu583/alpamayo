@@ -562,11 +562,11 @@ class AlpamayoController:
             accel_normalized = sampled_action_tensor[:, 0].cpu().numpy()
             curvature_normalized = sampled_action_tensor[:, 1].cpu().numpy()
 
-            # Denormalize to get real values
-            accel_std = self.model.action_space.accel_std.cpu().numpy()
-            accel_mean = self.model.action_space.accel_mean.cpu().numpy()
-            curv_std = self.model.action_space.curvature_std.cpu().numpy()
-            curv_mean = self.model.action_space.curvature_mean.cpu().numpy()
+            # Denormalize to get real values (convert from BFloat16 to float32 first)
+            accel_std = self.model.action_space.accel_std.cpu().float().numpy()
+            accel_mean = self.model.action_space.accel_mean.cpu().float().numpy()
+            curv_std = self.model.action_space.curvature_std.cpu().float().numpy()
+            curv_mean = self.model.action_space.curvature_mean.cpu().float().numpy()
 
             accel_real = accel_normalized * accel_std + accel_mean
             curvature_real = curvature_normalized * curv_std + curv_mean
