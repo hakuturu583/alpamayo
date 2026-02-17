@@ -322,6 +322,8 @@ class AlpamayoController:
             velocity = self.ego_vehicle.get_velocity()
             speed = np.sqrt(velocity.x**2 + velocity.y**2 + velocity.z**2)
             location = self.ego_vehicle.get_transform().location
+            control = self.ego_vehicle.get_control()
+            steer = control.steer
         except RuntimeError:
             # Actor destroyed during access
             return image_bgr
@@ -329,8 +331,8 @@ class AlpamayoController:
         # Create semi-transparent overlay for HUD
         overlay = image_bgr.copy()
 
-        # Draw background rectangle for HUD (top-left corner)
-        cv2.rectangle(overlay, (10, 10), (450, 150), (0, 0, 0), -1)
+        # Draw background rectangle for HUD (top-left corner, increased height for 5 lines)
+        cv2.rectangle(overlay, (10, 10), (450, 180), (0, 0, 0), -1)
         cv2.addWeighted(overlay, 0.4, image_bgr, 0.6, 0, image_bgr)
 
         # Font settings
@@ -355,6 +357,10 @@ class AlpamayoController:
         y_offset += line_height
         speed_limit = self._get_carla_speed_limit()
         cv2.putText(image_bgr, f"Speed Limit: {speed_limit:.1f} m/s ({speed_limit*3.6:.0f} km/h)",
+                    (20, y_offset), font, font_scale, (0, 255, 255), font_thickness)
+
+        y_offset += line_height
+        cv2.putText(image_bgr, f"Steer: {steer:+.3f}",
                     (20, y_offset), font, font_scale, (0, 255, 255), font_thickness)
 
         # Add Bird's Eye View (BEV) of trajectory in top-right corner
