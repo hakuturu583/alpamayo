@@ -70,8 +70,8 @@ class AlpamayoController:
 
         # Pure pursuit parameters
         self.wheelbase = 3.005  # meters (initial/fallback) - will be updated from CARLA physics
-        self.lookahead_time = 1.5  # seconds
-        self.min_lookahead_distance = 3.0  # meters
+        self.lookahead_time = 2.5  # seconds (increased for smoother path following)
+        self.min_lookahead_distance = 6.0  # meters (minimum lookahead at low speeds)
 
         # State tracking
         self.ego_history_xyz = []
