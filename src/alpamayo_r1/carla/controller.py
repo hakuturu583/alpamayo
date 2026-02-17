@@ -950,9 +950,37 @@ class AlpamayoController:
             current_rot_inv = current_rot.inv()
 
             history_xyz_local = current_rot_inv.apply(history_xyz - current_xyz)
+
+            # CRITICAL: Convert CARLA coordinate system (X=forward, Y=right) to
+            # Alpamayo coordinate system (X=forward, Y=left) by negating Y axis
+            history_xyz_local[:, 1] = -history_xyz_local[:, 1]
+
             history_rot_local = (
                 current_rot_inv * spt.Rotation.from_matrix(history_rot)
             ).as_matrix()
+
+            # Debug: Log ego history to analyze trajectory curvature
+            if self.step_count % 20 == 0:  # Log every 20 steps
+                print(f"\n[DEBUG Ego History] Step: {self.step_count}")
+                print(f"  History length: {num_history} steps")
+                print(f"  Global positions (last 4) - CARLA coords:")
+                for i in range(max(0, num_history-4), num_history):
+                    print(f"    [{i}] xyz: [{history_xyz[i, 0]:7.2f}, {history_xyz[i, 1]:7.2f}, {history_xyz[i, 2]:7.2f}]")
+                print(f"  Local positions (last 4) - Alpamayo coords (Y=left):")
+                for i in range(max(0, num_history-4), num_history):
+                    print(f"    [{i}] xyz: [{history_xyz_local[i, 0]:7.2f}, {history_xyz_local[i, 1]:7.2f}, {history_xyz_local[i, 2]:7.2f}]")
+                # Calculate path curvature from ego history
+                if num_history >= 3:
+                    positions_2d = history_xyz_local[:, :2]  # XY plane
+                    dx = np.gradient(positions_2d[:, 0])
+                    dy = np.gradient(positions_2d[:, 1])
+                    ddx = np.gradient(dx)
+                    ddy = np.gradient(dy)
+                    numerator = np.abs(dx * ddy - dy * ddx)
+                    denominator = np.power(dx**2 + dy**2, 1.5)
+                    curvatures = numerator / np.maximum(denominator, 1e-6)
+                    print(f"  Ego history curvature: mean={np.mean(curvatures):.4f}, max={np.max(curvatures):.4f}")
+                print(f"  Current speed: {current_speed:.2f} m/s, Target speed: {target_speed:.2f} m/s")
 
             # Add batch and temporal dimensions to match expected shape
             ego_history_xyz = torch.from_numpy(history_xyz_local).float()
@@ -1213,10 +1241,12 @@ class AlpamayoController:
         # Pure pursuit: calculate curvature
         # curvature = 2 * sin(alpha) / L, where sin(alpha) ≈ lateral_error / L
         # Simplified: curvature = 2 * lateral_error / L^2
-        # Note: Negative sign to match coordinate system (Alpamayo y=left, CARLA steer+=right)
+        # Alpamayo coords: Y=left (positive = target on left)
+        # CARLA control: steer positive = turn left
+        # Therefore: positive target_y → positive curvature → positive steer (NO negative sign!)
         steering_angle_rad = 0.0  # Initialize for debug output
         if lookahead_distance > 0.1:  # Avoid division by zero
-            curvature = -2.0 * target_y / (lookahead_distance**2)
+            curvature = 2.0 * target_y / (lookahead_distance**2)
 
             # Convert curvature to steering angle (in radians)
             # steering_angle = atan(wheelbase * curvature)
