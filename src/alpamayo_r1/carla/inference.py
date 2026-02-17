@@ -399,41 +399,21 @@ class CARLASimulation:
             print(f"Running scenario for {num_steps} steps...")
             for step in tqdm(range(num_steps), desc="Simulation", unit="step"):
                 try:
-                    # DEBUG: Log before world.tick()
-                    if step % 10 == 0 or step > 125:
-                        print(f"\n[DEBUG] Step {step}: Before world.tick()")
-
                     # Tick the world
                     self.world.tick()
-
-                    if step % 10 == 0 or step > 125:
-                        print(f"[DEBUG] Step {step}: After world.tick(), before get_snapshot()")
-
                     snapshot = self.world.get_snapshot()
-
-                    if step % 10 == 0 or step > 125:
-                        print(f"[DEBUG] Step {step}: After get_snapshot(), before get_camera_images()")
 
                     # Get camera images
                     images = self.get_camera_images()
                     if len(images) == 0:
                         print(f"Warning: No camera images received at step {step}")
 
-                    if step % 10 == 0 or step > 125:
-                        print(f"[DEBUG] Step {step}: Got {len(images)} camera images, before update_controller()")
-
                     # Update Alpamayo controller if enabled
                     if scenario.use_alpamayo_control:
                         scenario.update_controller(snapshot, images)
 
-                    if step % 10 == 0 or step > 125:
-                        print(f"[DEBUG] Step {step}: After update_controller(), before scenario.run()")
-
                     # Run scenario-specific logic
                     scenario.run()
-
-                    if step % 10 == 0 or step > 125:
-                        print(f"[DEBUG] Step {step}: Completed successfully")
 
                 except KeyboardInterrupt:
                     print("\nSimulation interrupted by user")
