@@ -442,23 +442,42 @@ class AlpamayoController:
         self.step_count += 1
         self.world_snapshot = world_snapshot
 
+        if self.step_count % 10 == 0 or self.step_count > 125:
+            print(f"[DEBUG] Controller step {self.step_count}: Before _update_ego_state()")
+
         # Update ego state
         self._update_ego_state()
+
+        if self.step_count % 10 == 0 or self.step_count > 125:
+            print(f"[DEBUG] Controller step {self.step_count}: After _update_ego_state(), before inference check")
 
         # Run model inference at control frequency (10Hz)
         # Only store images when inference is needed to save memory
         if self.step_count - self.last_control_step >= (1.0 / self.control_frequency) * 20:
+            if self.step_count > 125:
+                print(f"[DEBUG] Controller step {self.step_count}: Running inference...")
             self.current_images = camera_images  # Only store when needed
             self._run_inference()
             self.last_control_step = self.step_count
+            if self.step_count > 125:
+                print(f"[DEBUG] Controller step {self.step_count}: Inference complete")
+
+        if self.step_count % 10 == 0 or self.step_count > 125:
+            print(f"[DEBUG] Controller step {self.step_count}: Before _apply_control()")
 
         # Apply control EVERY frame (using latest prediction from model)
         # This allows smooth control at simulation rate (20Hz) while inference runs at 10Hz
         self._apply_control()
 
+        if self.step_count % 10 == 0 or self.step_count > 125:
+            print(f"[DEBUG] Controller step {self.step_count}: After _apply_control(), before video save")
+
         # Save visualization video
         if self.save_video and self.video_writer is not None:
             self._save_visualization_frame(camera_images)
+
+        if self.step_count % 10 == 0 or self.step_count > 125:
+            print(f"[DEBUG] Controller step {self.step_count}: Update complete")
 
     def _save_visualization_frame(self, camera_images: dict[str, np.ndarray]) -> None:
         """Save current frame with trajectory visualization to video.
@@ -770,10 +789,20 @@ class AlpamayoController:
             # Otherwise use automatic transmission
             control.manual_gear_shift = False
 
+        if self.step_count > 125:
+            print(f"[DEBUG] Step {self.step_count}: Before get_transform()")
+
         # Get vehicle state for debugging
         vehicle_transform = self.ego_vehicle.get_transform()
         vehicle_location = vehicle_transform.location
+
+        if self.step_count > 125:
+            print(f"[DEBUG] Step {self.step_count}: After get_transform(), before get_control()")
+
         vehicle_control_state = self.ego_vehicle.get_control()
+
+        if self.step_count > 125:
+            print(f"[DEBUG] Step {self.step_count}: After get_control(), before get camera")
 
         # Get camera state for debugging
         front_camera = self.cameras.get("camera_front_wide_120fov")
@@ -790,6 +819,9 @@ class AlpamayoController:
             camera_location = None
             camera_attached = False
 
+        if self.step_count > 125:
+            print(f"[DEBUG] Step {self.step_count}: After camera check, before print control")
+
         # Debug output with detailed vehicle and camera state
         print(f"[Control] Step: {self.step_count:4d} | "
               f"Target: ({target_x:5.2f}, {target_y:5.2f}) | "
@@ -803,7 +835,13 @@ class AlpamayoController:
               f"Brake: {control.brake:.3f} | "
               f"Gear: {vehicle_control_state.gear}")
 
+        if self.step_count > 125:
+            print(f"[DEBUG] Step {self.step_count}: Before apply_control()")
+
         self.ego_vehicle.apply_control(control)
+
+        if self.step_count > 125:
+            print(f"[DEBUG] Step {self.step_count}: After apply_control()")
 
     def _apply_simple_control(self) -> None:
         """Apply simple speed control when no trajectory available."""
