@@ -370,6 +370,9 @@ class CARLASimulation:
             print(f"Setting up scenario: {scenario.__class__.__name__}")
             scenario.setup()
 
+            # Set ego_vehicle reference from scenario
+            self.ego_vehicle = scenario.ego_vehicle
+
             # Setup cameras after ego vehicle is spawned
             self.setup_cameras()
 
