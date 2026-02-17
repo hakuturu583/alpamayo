@@ -104,6 +104,9 @@ class AlpamayoController:
         # Initialize vehicle control settings
         self._init_vehicle_control()
 
+        # Log vehicle physics parameters for comparison
+        self._log_vehicle_physics()
+
     def _init_vehicle_control(self) -> None:
         """Initialize vehicle control settings (gear, handbrake, etc.)."""
         # Disable autopilot to ensure manual control
@@ -122,6 +125,94 @@ class AlpamayoController:
         # Apply initial control
         self.ego_vehicle.apply_control(initial_control)
         print("Vehicle control initialized: automatic transmission, handbrake released")
+
+    def _log_vehicle_physics(self) -> None:
+        """Log vehicle physics parameters and compare with controller settings."""
+        print("\n" + "="*80)
+        print("VEHICLE PHYSICS PARAMETER COMPARISON")
+        print("="*80)
+
+        # Get CARLA vehicle physics
+        physics = self.ego_vehicle.get_physics_control()
+
+        # Extract wheelbase from wheel positions
+        # CARLA stores 4 wheels: [front_left, front_right, rear_left, rear_right]
+        wheels = physics.wheels
+        if len(wheels) >= 4:
+            # Calculate wheelbase as distance between front and rear axles
+            front_wheel = wheels[0]  # front left
+            rear_wheel = wheels[2]   # rear left
+            actual_wheelbase = abs(front_wheel.position.x - rear_wheel.position.x) / 100.0  # cm to m
+
+            print(f"\n[Wheelbase]")
+            print(f"  CARLA actual:        {actual_wheelbase:.3f} m")
+            print(f"  Controller setting:  {self.wheelbase:.3f} m")
+            print(f"  Difference:          {abs(actual_wheelbase - self.wheelbase):.3f} m ({abs(actual_wheelbase - self.wheelbase) / actual_wheelbase * 100:.1f}%)")
+
+        # Get max steering angle from front wheels and store it for normalization
+        if len(wheels) >= 2:
+            max_steer_angle_deg = wheels[0].max_steer_angle  # degrees
+            max_steer_angle_rad = np.deg2rad(max_steer_angle_deg)
+
+            # Store for use in control normalization
+            self.max_steer_angle_rad = max_steer_angle_rad
+
+            print(f"\n[Max Steering Angle]")
+            print(f"  CARLA max:           {max_steer_angle_rad:.3f} rad ({max_steer_angle_deg:.1f} deg)")
+            print(f"  Controller max:      {self.max_steering:.3f} rad ({np.rad2deg(self.max_steering):.1f} deg)")
+            print(f"  Difference:          {abs(max_steer_angle_rad - self.max_steering):.3f} rad ({abs(max_steer_angle_rad - self.max_steering) / max_steer_angle_rad * 100:.1f}%)")
+
+            # Calculate max curvature achievable with CARLA's max steering
+            if actual_wheelbase > 0:
+                carla_max_curvature = np.tan(max_steer_angle_rad) / actual_wheelbase
+                controller_max_curvature = np.tan(self.max_steering) / self.wheelbase
+
+                print(f"\n[Max Curvature (from steering)]")
+                print(f"  CARLA max:           {carla_max_curvature:.4f} (1/m) -> min radius: {1/carla_max_curvature:.1f} m")
+                print(f"  Controller max:      {controller_max_curvature:.4f} (1/m) -> min radius: {1/controller_max_curvature:.1f} m")
+
+        # Compare with Unicycle model parameters
+        if self.model is not None:
+            action_space = self.model.action_space
+            curv_bounds = action_space.curvature_bounds.cpu().float().numpy()
+            curv_std = action_space.curvature_std.cpu().float().item()
+            curv_mean = action_space.curvature_mean.cpu().float().item()
+
+            print(f"\n[Unicycle Model Curvature Parameters]")
+            print(f"  Bounds:              [{curv_bounds[0]:.4f}, {curv_bounds[1]:.4f}] (1/m)")
+            print(f"  Min radius:          {1/max(abs(curv_bounds[0]), abs(curv_bounds[1])):.1f} m")
+            print(f"  Std (normalization): {curv_std:.4f}")
+            print(f"  Mean:                {curv_mean:.4f}")
+            print(f"\n  Note: Small std={curv_std:.4f} means normalized outputs need scaling!")
+
+            # Check acceleration parameters too
+            accel_bounds = action_space.accel_bounds.cpu().float().numpy()
+            accel_std = action_space.accel_std.cpu().float().item()
+            accel_mean = action_space.accel_mean.cpu().float().item()
+
+            print(f"\n[Unicycle Model Acceleration Parameters]")
+            print(f"  Bounds:              [{accel_bounds[0]:.2f}, {accel_bounds[1]:.2f}] (m/s²)")
+            print(f"  Std (normalization): {accel_std:.2f}")
+            print(f"  Mean:                {accel_mean:.2f}")
+
+        # Center of mass
+        com = physics.center_of_mass
+        print(f"\n[Center of Mass]")
+        print(f"  Position:            x={com.x/100:.3f}m, y={com.y/100:.3f}m, z={com.z/100:.3f}m")
+
+        # Vehicle mass
+        print(f"\n[Mass]")
+        print(f"  Total mass:          {physics.mass:.1f} kg")
+
+        print("\n" + "="*80)
+        print("CARLA VEHICLE CONTROL INPUT RANGES")
+        print("="*80)
+        print(f"  control.steer:       [-1.0, 1.0] (normalized)")
+        print(f"  control.throttle:    [0.0, 1.0]")
+        print(f"  control.brake:       [0.0, 1.0]")
+        print(f"\n  Note: control.steer is NORMALIZED [-1.0, 1.0], NOT in radians!")
+        print(f"  Actual angle = control.steer * max_steer_angle")
+        print("="*80 + "\n")
 
     def _init_video_writer(self) -> None:
         """Initialize video writer for trajectory visualization."""
@@ -913,15 +1004,21 @@ class AlpamayoController:
         # Pure pursuit: calculate curvature
         # curvature = 2 * sin(alpha) / L, where sin(alpha) ≈ lateral_error / L
         # Simplified: curvature = 2 * lateral_error / L^2
+        steering_angle_rad = 0.0  # Initialize for debug output
         if lookahead_distance > 0.1:  # Avoid division by zero
             curvature = 2.0 * target_y / (lookahead_distance**2)
 
-            # Convert curvature to steering angle
-            # steering = atan(wheelbase * curvature)
-            steering = np.arctan(self.wheelbase * curvature)
+            # Convert curvature to steering angle (in radians)
+            # steering_angle = atan(wheelbase * curvature)
+            steering_angle_rad = np.arctan(self.wheelbase * curvature)
 
-            # Clamp to max steering
-            steering = np.clip(steering, -self.max_steering, self.max_steering)
+            # Clamp to max steering angle (radians)
+            max_steer_rad = getattr(self, 'max_steer_angle_rad', self.max_steering)
+            steering_angle_rad = np.clip(steering_angle_rad, -max_steer_rad, max_steer_rad)
+
+            # Normalize to CARLA's control range [-1.0, 1.0]
+            # control.steer is normalized, where 1.0 = max_steer_angle
+            steering = steering_angle_rad / max_steer_rad
         else:
             # Too close, go straight
             steering = 0.0
@@ -969,11 +1066,12 @@ class AlpamayoController:
             camera_attached = False
 
         # Debug output
+        steering_deg = np.rad2deg(steering_angle_rad)
         print(f"[Control] Step: {self.step_count:4d} | "
               f"WP[{best_idx:2d}]: ({target_x:5.2f}, {target_y:5.2f}) | "
               f"Lookahead: {lookahead_distance:.1f}m | "
               f"Speed: {current_speed:4.1f}/{target_speed:4.1f} m/s | "
-              f"Steer: {control.steer:+.3f} | "
+              f"Steer: {steering_deg:+5.1f}° ({control.steer:+.3f}) | "
               f"Throttle: {control.throttle:.3f}")
 
         self.ego_vehicle.apply_control(control)
