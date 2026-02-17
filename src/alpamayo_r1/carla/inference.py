@@ -390,7 +390,8 @@ class CARLASimulation:
             # Initialize Alpamayo controller if model-based control is enabled
             if scenario.use_alpamayo_control:
                 print("Initializing Alpamayo controller...")
-                scenario.initialize_alpamayo_controller(self.cameras)
+                save_video = getattr(scenario, 'save_video', True)  # Default to True if not set
+                scenario.initialize_alpamayo_controller(self.cameras, save_video=save_video)
 
             print("Spawning NPCs...")
             scenario.spawn_npcs()

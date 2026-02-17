@@ -105,6 +105,11 @@ def main():
         default=5.0,
         help="Target speed in m/s (default: 5.0 m/s = 18 km/h)",
     )
+    parser.add_argument(
+        "--no-video",
+        action="store_true",
+        help="Disable video recording to test if it causes segfault",
+    )
 
     args = parser.parse_args()
 
@@ -197,6 +202,9 @@ def main():
             processor=processor,
             use_alpamayo_control=True,  # Enable Alpamayo controller
         )
+
+        # Store save_video setting for controller initialization
+        scenario.save_video = not args.no_video
 
         # Set target speed if controller is initialized
         if scenario.alpamayo_controller is not None:

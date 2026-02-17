@@ -104,11 +104,12 @@ class BaseScenario(ABC):
         """
         pass
 
-    def initialize_alpamayo_controller(self, cameras: dict[str, Any]) -> None:
+    def initialize_alpamayo_controller(self, cameras: dict[str, Any], save_video: bool = True) -> None:
         """Initialize Alpamayo controller after ego vehicle and cameras are ready.
 
         Args:
             cameras: Dictionary mapping camera names to camera actors
+            save_video: Whether to save visualization video (default: True)
         """
         if self.use_alpamayo_control and self.ego_vehicle is not None:
             # Create log directory with timestamp for this scenario run
@@ -122,6 +123,7 @@ class BaseScenario(ABC):
                 model=self.model,
                 processor=self.processor,
                 control_frequency=10.0,
+                save_video=save_video,
                 log_dir=log_dir,
             )
             print("Alpamayo controller initialized")
