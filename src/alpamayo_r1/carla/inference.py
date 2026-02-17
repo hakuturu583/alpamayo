@@ -370,6 +370,9 @@ class CARLASimulation:
             print(f"Setting up scenario: {scenario.__class__.__name__}")
             scenario.setup()
 
+            # Setup cameras after ego vehicle is spawned
+            self.setup_cameras()
+
             # Initialize Alpamayo controller if model-based control is enabled
             if scenario.use_alpamayo_control:
                 print("Initializing Alpamayo controller...")

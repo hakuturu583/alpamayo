@@ -179,19 +179,6 @@ def main():
 
     # Create simulation
     with CARLASimulation(host=args.host, port=args.port, map_name=args.map) as sim:
-        # Spawn ego vehicle
-        spawn_points = sim.world.get_map().get_spawn_points()
-        if args.spawn_point >= len(spawn_points):
-            print(
-                f"Warning: spawn point {args.spawn_point} out of range, using 0 instead"
-            )
-            args.spawn_point = 0
-
-        sim.spawn_ego_vehicle(spawn_points[args.spawn_point])
-
-        # Setup cameras
-        sim.setup_cameras()
-
         # Create scenario with Alpamayo control enabled
         scenario_config = {
             "num_vehicles": args.num_vehicles,
