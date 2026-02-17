@@ -145,22 +145,16 @@ class AlpamayoController:
         ])
 
         # Camera extrinsics (relative to ego vehicle)
-        # Get relative transform from camera sensor
-        camera_transform = front_camera.get_transform()
+        # Use the known camera configuration from CameraConfig
+        # Front wide camera is mounted at x=2.0m (forward), y=0.0m (left), z=1.5m (up)
+        # with rotation pitch=0, yaw=0, roll=0 (aligned with vehicle)
+        self.camera_offset = np.array([2.0, 0.0, 1.5])
 
-        # Camera position relative to ego vehicle (in ego vehicle frame)
-        # CARLA camera is typically mounted at [1.5, 0, 2.0] for front camera
-        cam_loc = camera_transform.location
-        self.camera_offset = np.array([cam_loc.x, cam_loc.y, cam_loc.z])
+        # Camera rotation relative to ego vehicle (identity for front camera)
+        self.camera_rotation = spt.Rotation.from_euler('zyx', [0, 0, 0])
 
-        # Camera rotation relative to ego vehicle
-        cam_rot = camera_transform.rotation
-        pitch = np.radians(cam_rot.pitch)
-        yaw = np.radians(cam_rot.yaw)
-        roll = np.radians(cam_rot.roll)
-
-        # Store relative rotation (this doesn't change as camera is fixed to vehicle)
-        self.camera_rotation = spt.Rotation.from_euler('zyx', [yaw, pitch, roll])
+        print(f"Camera offset (ego vehicle frame): {self.camera_offset}")
+        print(f"Camera rotation: {self.camera_rotation.as_euler('zyx', degrees=True)}")
 
     def _project_trajectory_to_image(self, trajectory_local: np.ndarray) -> tuple:
         """Project 3D trajectory to 2D image coordinates.
@@ -175,23 +169,26 @@ class AlpamayoController:
         if trajectory_local.shape[0] == 0:
             return np.array([]), np.array([])
 
-        # Transform from ego vehicle frame to camera frame
-        # Ego frame: X=forward, Y=left, Z=up
-        # Camera frame (CARLA): X=forward, Y=right, Z=up
-        # Note: Camera rotation is usually identity for front camera
+        # Transform from PhysicalAI-AV frame to camera frame
+        # PhysicalAI-AV frame (trajectory): X=forward, Y=left, Z=up
+        # CARLA frame: X=forward, Y=right, Z=up
+        # Need to flip Y axis: Y_physicalai = -Y_carla
 
-        # Translate to camera position (camera is offset from ego center)
-        traj_translated = trajectory_local - self.camera_offset
+        # Step 1: Convert PhysicalAI-AV frame to CARLA frame
+        traj_carla = trajectory_local.copy()
+        traj_carla[:, 1] = -traj_carla[:, 1]  # Flip Y axis (left -> right)
 
-        # Apply camera rotation (if camera is not aligned with vehicle)
-        # This converts from ego frame to camera frame
-        traj_cam = self.camera_rotation.inv().apply(traj_translated)
+        # Step 2: Translate to camera position (camera is offset from ego center)
+        # Camera offset is in CARLA frame
+        traj_cam_carla = traj_carla - self.camera_offset
 
-        # Filter points behind camera (X > 0 in CARLA camera frame)
-        # In CARLA camera coordinate: X=forward, Y=right, Z=up
+        # Step 3: Apply camera rotation (identity for front camera)
+        traj_cam = self.camera_rotation.inv().apply(traj_cam_carla)
+
+        # Step 4: Filter points behind camera (X > 0 in CARLA camera frame)
         valid_mask = traj_cam[:, 0] > 0.1  # At least 10cm in front
 
-        # Convert to standard computer vision camera frame
+        # Step 5: Convert CARLA camera frame to standard CV camera frame
         # CARLA camera: X=forward, Y=right, Z=up
         # Standard CV: X=right, Y=down, Z=forward
         # CARLA: [X, Y, Z] -> Standard CV: [Y, -Z, X]
@@ -238,7 +235,7 @@ class AlpamayoController:
             img_with_hud = self._add_hud_overlay(img_bgr)
             return cv2.cvtColor(img_with_hud, cv2.COLOR_BGR2RGB)
 
-        # Draw trajectory as connected line segments
+        # Draw trajectory as connected line segments with gradient color
         prev_point = None
         for i, (point, valid) in enumerate(zip(points_2d, valid_mask)):
             if not valid:
@@ -249,14 +246,23 @@ class AlpamayoController:
 
             # Check if point is within image bounds
             if 0 <= u < self.image_width and 0 <= v < self.image_height:
-                # Draw point with thicker circle for better visibility
-                cv2.circle(img_bgr, (u, v), 5, (0, 255, 0), -1)  # Green circle
+                # Color gradient from green (near) to red (far)
+                ratio = i / len(points_2d)
+                color = (0, int(255 * (1 - ratio)), int(255 * ratio))  # BGR: Green -> Yellow -> Red
 
-                # Draw line from previous point with thicker line
+                # Draw point with thicker circle for better visibility
+                cv2.circle(img_bgr, (u, v), 6, color, -1)
+
+                # Draw index number for first, middle, and last few points
+                if i < 3 or i > len(points_2d) - 4 or i % 10 == 0:
+                    cv2.putText(img_bgr, str(i), (u + 8, v - 8),
+                               cv2.FONT_HERSHEY_SIMPLEX, 0.4, color, 1)
+
+                # Draw line from previous point
                 if prev_point is not None:
                     prev_u, prev_v = int(prev_point[0]), int(prev_point[1])
                     if 0 <= prev_u < self.image_width and 0 <= prev_v < self.image_height:
-                        cv2.line(img_bgr, (prev_u, prev_v), (u, v), (0, 255, 0), 4)  # Thicker green line
+                        cv2.line(img_bgr, (prev_u, prev_v), (u, v), color, 3)
 
                 prev_point = point
             else:
@@ -325,7 +331,80 @@ class AlpamayoController:
         cv2.putText(image_bgr, f"Target Speed: {self.target_speed:.1f} m/s",
                     (20, y_offset), font, font_scale, (0, 255, 255), font_thickness)
 
+        # Add Bird's Eye View (BEV) of trajectory in top-right corner
+        if self.predicted_trajectory is not None and len(self.predicted_trajectory) > 0:
+            self._draw_bev_trajectory(image_bgr)
+
         return image_bgr
+
+    def _draw_bev_trajectory(self, image_bgr: np.ndarray) -> None:
+        """Draw Bird's Eye View of trajectory in top-right corner.
+
+        Args:
+            image_bgr: Image in BGR format
+        """
+        # BEV parameters
+        bev_width = 300
+        bev_height = 400
+        bev_margin = 20
+        bev_x = self.image_width - bev_width - bev_margin
+        bev_y = bev_margin
+
+        # Create semi-transparent background
+        overlay = image_bgr.copy()
+        cv2.rectangle(overlay, (bev_x, bev_y),
+                     (bev_x + bev_width, bev_y + bev_height),
+                     (0, 0, 0), -1)
+        cv2.addWeighted(overlay, 0.5, image_bgr, 0.5, 0, image_bgr)
+
+        # Draw border
+        cv2.rectangle(image_bgr, (bev_x, bev_y),
+                     (bev_x + bev_width, bev_y + bev_height),
+                     (255, 255, 255), 2)
+
+        # Add title
+        cv2.putText(image_bgr, "Bird's Eye View", (bev_x + 10, bev_y + 25),
+                   cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
+
+        # Scale trajectory to fit BEV (assume max 20m forward, 5m lateral)
+        max_forward = 20.0  # meters
+        max_lateral = 5.0   # meters
+        scale_x = bev_height / max_forward
+        scale_y = bev_width / (2 * max_lateral)
+
+        # Center of BEV (ego vehicle position)
+        center_x = bev_x + bev_width // 2
+        center_y = bev_y + bev_height - 20  # Bottom with margin
+
+        # Draw ego vehicle (triangle pointing up)
+        ego_size = 15
+        ego_pts = np.array([
+            [center_x, center_y - ego_size],      # Front
+            [center_x - ego_size//2, center_y + ego_size//2],  # Rear left
+            [center_x + ego_size//2, center_y + ego_size//2],  # Rear right
+        ], dtype=np.int32)
+        cv2.fillPoly(image_bgr, [ego_pts], (0, 255, 255))
+
+        # Draw trajectory waypoints
+        for i, waypoint in enumerate(self.predicted_trajectory):
+            # Transform to BEV coordinates
+            # waypoint: [x_forward, y_left, z_up]
+            x_forward = waypoint[0]
+            y_left = waypoint[1]
+
+            # BEV coordinates (flip Y to match screen coordinates)
+            bev_point_x = int(center_x - y_left * scale_y)
+            bev_point_y = int(center_y - x_forward * scale_x)
+
+            # Check if point is within BEV bounds
+            if (bev_x < bev_point_x < bev_x + bev_width and
+                bev_y + 30 < bev_point_y < bev_y + bev_height):
+                # Color gradient from green (near) to red (far)
+                ratio = i / len(self.predicted_trajectory)
+                color = (0, int(255 * (1 - ratio)), int(255 * ratio))
+
+                # Draw waypoint
+                cv2.circle(image_bgr, (bev_point_x, bev_point_y), 3, color, -1)
 
     def update(self, world_snapshot: Any, camera_images: dict[str, np.ndarray]) -> None:
         """Update controller state and compute control commands.
@@ -638,11 +717,20 @@ class AlpamayoController:
 
         # Apply control
         control = carla.VehicleControl()
-        control.manual_gear_shift = False  # Automatic transmission
         control.hand_brake = False  # Ensure handbrake is off
         control.throttle = float(throttle)
         control.steer = float(steering)
         control.brake = float(brake)
+
+        # Check current gear and set to forward if needed
+        current_control = self.ego_vehicle.get_control()
+        if current_control.gear == 0:
+            # If in neutral, manually set gear to 1 (forward)
+            control.manual_gear_shift = True
+            control.gear = 1
+        else:
+            # Otherwise use automatic transmission
+            control.manual_gear_shift = False
 
         # Get vehicle state for debugging
         vehicle_transform = self.ego_vehicle.get_transform()
@@ -690,11 +778,20 @@ class AlpamayoController:
         throttle = np.clip(0.5 * speed_error, 0.0, 1.0)
 
         control = carla.VehicleControl()
-        control.manual_gear_shift = False  # Automatic transmission
         control.hand_brake = False  # Ensure handbrake is off
         control.throttle = float(throttle)
         control.steer = 0.0
         control.brake = 0.0
+
+        # Check current gear and set to forward if needed
+        current_control = self.ego_vehicle.get_control()
+        if current_control.gear == 0:
+            # If in neutral, manually set gear to 1 (forward)
+            control.manual_gear_shift = True
+            control.gear = 1
+        else:
+            # Otherwise use automatic transmission
+            control.manual_gear_shift = False
 
         # Debug output
         print(f"[Control-Simple] Step: {self.step_count:4d} | "
