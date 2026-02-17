@@ -371,18 +371,37 @@ class AlpamayoController:
         # Project trajectory to image
         points_2d, valid_mask = self._project_trajectory_to_image(trajectory_local)
 
-        # Draw vehicle origin marker (ego coordinate system origin)
-        # This helps visualize if there's an offset issue
-        origin_local = np.array([[0.0, 0.0, 0.0]])  # Vehicle origin in local frame
-        origin_2d, origin_valid = self._project_trajectory_to_image(origin_local)
-        if origin_valid[0]:
-            u_origin, v_origin = int(origin_2d[0, 0]), int(origin_2d[0, 1])
-            if 0 <= u_origin < self.image_width and 0 <= v_origin < self.image_height:
-                # Draw large cross marker for origin
-                cv2.drawMarker(img_bgr, (u_origin, v_origin), (255, 0, 255),  # Magenta
-                              cv2.MARKER_CROSS, 30, 3)
-                cv2.putText(img_bgr, "EGO ORIGIN", (u_origin + 20, v_origin - 10),
-                           cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 0, 255), 2)
+        # Draw reference markers to visualize coordinate system
+        # Camera is at [2.0, 0.0, 1.5] from vehicle origin, so origin is likely out of view
+
+        # 1. Draw rear axle position (Unicycle model origin)
+        # Estimate rear axle from bounding box (if available)
+        try:
+            bbox = self.ego_vehicle.bounding_box
+            # Rear axle is approximately at rear bumper + small offset
+            rear_axle_x = bbox.location.x - bbox.extent.x + 0.5  # ~0.5m from rear bumper
+            rear_axle_local = np.array([[rear_axle_x, 0.0, 0.0]])
+            rear_axle_2d, rear_axle_valid = self._project_trajectory_to_image(rear_axle_local)
+            if rear_axle_valid[0]:
+                u_ra, v_ra = int(rear_axle_2d[0, 0]), int(rear_axle_2d[0, 1])
+                if 0 <= u_ra < self.image_width and 0 <= v_ra < self.image_height:
+                    cv2.drawMarker(img_bgr, (u_ra, v_ra), (255, 0, 255),  # Magenta
+                                  cv2.MARKER_CROSS, 25, 3)
+                    cv2.putText(img_bgr, "REAR AXLE", (u_ra + 15, v_ra - 10),
+                               cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 0, 255), 2)
+        except (AttributeError, RuntimeError):
+            pass
+
+        # 2. Draw vehicle front reference (visible in camera view)
+        front_ref_local = np.array([[3.0, 0.0, 0.0]])  # 3m forward from origin
+        front_ref_2d, front_ref_valid = self._project_trajectory_to_image(front_ref_local)
+        if front_ref_valid[0]:
+            u_fr, v_fr = int(front_ref_2d[0, 0]), int(front_ref_2d[0, 1])
+            if 0 <= u_fr < self.image_width and 0 <= v_fr < self.image_height:
+                cv2.drawMarker(img_bgr, (u_fr, v_fr), (0, 255, 255),  # Yellow
+                              cv2.MARKER_DIAMOND, 20, 2)
+                cv2.putText(img_bgr, "3m FWD", (u_fr + 15, v_fr + 20),
+                           cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 255), 2)
 
         if points_2d.shape[0] == 0:
             # Add HUD even if no trajectory
@@ -405,7 +424,14 @@ class AlpamayoController:
                 color = (0, int(255 * (1 - ratio)), int(255 * ratio))  # BGR: Green -> Yellow -> Red
 
                 # Draw point with thicker circle for better visibility
-                cv2.circle(img_bgr, (u, v), 6, color, -1)
+                # Emphasize trajectory start point (index 0)
+                if i == 0:
+                    cv2.circle(img_bgr, (u, v), 15, (255, 255, 0), 3)  # Large cyan circle
+                    cv2.circle(img_bgr, (u, v), 8, color, -1)  # Filled center
+                    cv2.putText(img_bgr, "TRAJ START", (u + 20, v),
+                               cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 0), 2)
+                else:
+                    cv2.circle(img_bgr, (u, v), 6, color, -1)
 
                 # Draw index number for first, middle, and last few points
                 if i < 3 or i > len(points_2d) - 4 or i % 10 == 0:
