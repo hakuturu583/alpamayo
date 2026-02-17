@@ -25,8 +25,14 @@ MAX_PIXELS = 196608
 BASE_PROCESSOR_NAME = "Qwen/Qwen3-VL-2B-Instruct"
 
 
-def create_message(frames: torch.Tensor):
-    """Construct the message using images and cot."""
+def create_message(frames: torch.Tensor, current_speed: float | None = None, target_speed: float | None = None):
+    """Construct the message using images and cot.
+
+    Args:
+        frames: Image frames tensor (N, C, H, W)
+        current_speed: Current vehicle speed in m/s
+        target_speed: Target speed in m/s (e.g., from speed limit)
+    """
     assert frames.ndim == 4, f"{frames.ndim=}, expected (N, C, H, W)"
 
     # NOTE: we expand the padding tokens to match training, so we can directly apply native processor from VLM.
@@ -34,6 +40,13 @@ def create_message(frames: torch.Tensor):
     hist_traj_placeholder = (
         f"<|traj_history_start|>{'<|traj_history|>' * num_traj_token}<|traj_history_end|>"
     )
+
+    # Build speed context text
+    speed_context = ""
+    if current_speed is not None and target_speed is not None:
+        speed_context = f"Current speed: {current_speed:.1f} m/s, Target speed: {target_speed:.1f} m/s. "
+    elif current_speed is not None:
+        speed_context = f"Current speed: {current_speed:.1f} m/s. "
 
     return [
         {
@@ -51,7 +64,7 @@ def create_message(frames: torch.Tensor):
             + [
                 {
                     "type": "text",
-                    "text": f"{hist_traj_placeholder}output the chain-of-thought reasoning of the driving process, then output the future trajectory.",
+                    "text": f"{hist_traj_placeholder}{speed_context}output the chain-of-thought reasoning of the driving process, then output the future trajectory.",
                 }
             ],
         },

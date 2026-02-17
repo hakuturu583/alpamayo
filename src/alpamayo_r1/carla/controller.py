@@ -658,9 +658,18 @@ class AlpamayoController:
         # Stack images: (N_cameras, C, H, W)
         images = torch.stack(image_list, dim=0)
 
+        # Get current vehicle speed
+        current_velocity = self.ego_vehicle.get_velocity()
+        current_speed = np.sqrt(
+            current_velocity.x**2 + current_velocity.y**2 + current_velocity.z**2
+        )
+
+        # Get target speed (speed limit with reduction factor applied)
+        target_speed = self._get_carla_speed_limit() * self._get_speed_reduction_factor()
+
         # Create messages from images using helper
         # helper.create_message expects (N, C, H, W)
-        messages = helper.create_message(images)
+        messages = helper.create_message(images, current_speed=current_speed, target_speed=target_speed)
 
         # Tokenize using processor
         tokenized_inputs = self.processor.apply_chat_template(
