@@ -167,8 +167,8 @@ class BaseScenario(ABC):
             try:
                 if controller is not None and controller.is_alive:
                     controller.stop()
-            except RuntimeError:
-                pass  # Already destroyed
+            except (RuntimeError, AttributeError):
+                pass  # Already destroyed or invalid
 
         # Destroy all actors
         actors_to_destroy = (
@@ -181,12 +181,20 @@ class BaseScenario(ABC):
         if self.ego_vehicle is not None:
             actors_to_destroy.append(self.ego_vehicle)
 
+        destroyed_count = 0
         for actor in actors_to_destroy:
+            if actor is None:
+                continue
             try:
-                if actor is not None and actor.is_alive:
+                # Check if actor is alive before destroying
+                if actor.is_alive:
                     actor.destroy()
-            except RuntimeError:
-                pass  # Already destroyed
+                    destroyed_count += 1
+            except (RuntimeError, AttributeError):
+                pass  # Already destroyed or invalid
+
+        if destroyed_count > 0:
+            print(f"Destroyed {destroyed_count} actors")
 
         # Clear lists
         self.sensors.clear()

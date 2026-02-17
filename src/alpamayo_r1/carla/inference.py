@@ -492,20 +492,16 @@ class CARLASimulation:
         """Clean up all actors and restore settings."""
         print("Cleaning up CARLA simulation...")
 
-        # Destroy cameras
+        # Stop camera listeners (but don't destroy - scenario will handle that)
         for camera in self.cameras.values():
             try:
                 if camera is not None and camera.is_alive:
-                    camera.destroy()
-            except RuntimeError:
-                pass  # Already destroyed
+                    camera.stop()
+            except (RuntimeError, AttributeError):
+                pass  # Already stopped or destroyed
 
-        # Destroy ego vehicle
-        try:
-            if self.ego_vehicle is not None and self.ego_vehicle.is_alive:
-                self.ego_vehicle.destroy()
-        except RuntimeError:
-            pass  # Already destroyed
+        # NOTE: Don't destroy cameras and ego_vehicle here - they are managed by scenario
+        # scenario.cleanup() will destroy all actors to avoid double-free
 
         # Restore asynchronous mode
         if self.world is not None:
@@ -516,6 +512,7 @@ class CARLASimulation:
             except RuntimeError:
                 pass  # World might be invalid
 
+        # Clear references (but don't destroy actors)
         self.cameras.clear()
         self.camera_queues.clear()
         self.ego_vehicle = None
