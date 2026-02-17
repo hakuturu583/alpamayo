@@ -1213,9 +1213,10 @@ class AlpamayoController:
         # Pure pursuit: calculate curvature
         # curvature = 2 * sin(alpha) / L, where sin(alpha) ≈ lateral_error / L
         # Simplified: curvature = 2 * lateral_error / L^2
+        # Note: Negative sign to match coordinate system (Alpamayo y=left, CARLA steer+=right)
         steering_angle_rad = 0.0  # Initialize for debug output
         if lookahead_distance > 0.1:  # Avoid division by zero
-            curvature = 2.0 * target_y / (lookahead_distance**2)
+            curvature = -2.0 * target_y / (lookahead_distance**2)
 
             # Convert curvature to steering angle (in radians)
             # steering_angle = atan(wheelbase * curvature)
