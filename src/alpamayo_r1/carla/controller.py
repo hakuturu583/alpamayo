@@ -520,6 +520,12 @@ class AlpamayoController:
             # Clear CUDA cache to free memory for next inference
             torch.cuda.empty_cache()
 
+            # Log GPU memory usage every 10 inferences
+            if self.step_count % 20 == 0:
+                allocated = torch.cuda.memory_allocated(0) / 1e9
+                reserved = torch.cuda.memory_reserved(0) / 1e9
+                print(f"[GPU Memory] Allocated: {allocated:.2f} GB, Reserved: {reserved:.2f} GB")
+
         except Exception as e:
             print(f"Model inference failed: {e}")
             import traceback

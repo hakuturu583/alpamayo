@@ -346,7 +346,18 @@ class CARLASimulation:
 
         for name, image_queue in self.camera_queues.items():
             try:
-                image = image_queue.get(timeout=timeout)
+                # Get latest image and discard old ones to prevent memory buildup
+                image = None
+                while True:
+                    try:
+                        image = image_queue.get(block=False)
+                    except queue.Empty:
+                        break
+
+                # If no image in queue, wait for new one
+                if image is None:
+                    image = image_queue.get(timeout=timeout)
+
                 # Convert CARLA image to numpy array (BGRA -> RGB)
                 array = np.frombuffer(image.raw_data, dtype=np.uint8)
                 array = array.reshape((image.height, image.width, 4))
