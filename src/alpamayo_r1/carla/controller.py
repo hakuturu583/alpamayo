@@ -683,6 +683,64 @@ class AlpamayoController:
             self.ego_history_xyz = self.ego_history_xyz[-max_history:]
             self.ego_history_rot = self.ego_history_rot[-max_history:]
 
+    def _analyze_trajectory_offset(self) -> None:
+        """Analyze coordinate offset between trajectory start and expected origins.
+
+        This helps diagnose if the trajectory is offset from the expected vehicle origin,
+        which can cause 'curves too late' behavior.
+        """
+        if self.predicted_trajectory is None or len(self.predicted_trajectory) == 0:
+            return
+
+        # Only print every 20 steps to avoid spam
+        if self.step_count % 20 != 0:
+            return
+
+        try:
+            # 1. Vehicle origin (by definition)
+            vehicle_origin = np.array([0.0, 0.0, 0.0])
+
+            # 2. Estimated rear axle position (Unicycle model origin)
+            bbox = self.ego_vehicle.bounding_box
+            # Rear axle is approximately at rear bumper + small offset
+            rear_axle_x = bbox.location.x - bbox.extent.x + 0.5  # ~0.5m from rear bumper
+            rear_axle_pos = np.array([rear_axle_x, 0.0, 0.0])
+
+            # 3. Trajectory start point
+            traj_start = self.predicted_trajectory[0]  # (3,) [x, y, z]
+
+            # 4. Calculate offsets
+            offset_from_vehicle = traj_start - vehicle_origin
+            offset_from_rear_axle = traj_start - rear_axle_pos
+
+            print("\n" + "="*70)
+            print("TRAJECTORY COORDINATE OFFSET ANALYSIS")
+            print("="*70)
+            print(f"Vehicle origin (CARLA):     ({vehicle_origin[0]:6.3f}, {vehicle_origin[1]:6.3f}, {vehicle_origin[2]:6.3f}) m")
+            print(f"Rear axle (estimated):      ({rear_axle_pos[0]:6.3f}, {rear_axle_pos[1]:6.3f}, {rear_axle_pos[2]:6.3f}) m")
+            print(f"Trajectory start [0]:       ({traj_start[0]:6.3f}, {traj_start[1]:6.3f}, {traj_start[2]:6.3f}) m")
+            print(f"\nOffset from vehicle origin: ({offset_from_vehicle[0]:6.3f}, {offset_from_vehicle[1]:6.3f}, {offset_from_vehicle[2]:6.3f}) m")
+            print(f"Offset from rear axle:      ({offset_from_rear_axle[0]:6.3f}, {offset_from_rear_axle[1]:6.3f}, {offset_from_rear_axle[2]:6.3f}) m")
+
+            # Diagnose issues
+            forward_offset_from_rear = offset_from_rear_axle[0]
+            if abs(forward_offset_from_rear) > 0.5:
+                print(f"\n⚠ WARNING: Trajectory starts {forward_offset_from_rear:.2f}m from rear axle!")
+                print(f"⚠ Expected offset: ~0.0m (Unicycle model assumes rear axle origin)")
+                if forward_offset_from_rear > 0.5:
+                    print(f"⚠ Forward offset explains 'curves too late' behavior.")
+                    print(f"⚠ Consider applying correction: trajectory -= [{forward_offset_from_rear:.3f}, 0, 0]")
+                else:
+                    print(f"⚠ Backward offset may cause 'curves too early' behavior.")
+            else:
+                print(f"\n✓ Trajectory origin alignment looks good (offset: {forward_offset_from_rear:.3f}m)")
+
+            print("="*70 + "\n")
+
+        except (AttributeError, RuntimeError, IndexError) as e:
+            # Silently ignore if vehicle is destroyed or bbox not available
+            pass
+
     def _run_inference(self) -> None:
         """Run Alpamayo R1 model inference on current observations."""
         if self.model is None or self.processor is None or len(self.current_images) == 0:
@@ -760,6 +818,9 @@ class AlpamayoController:
 
             # Extract corrected trajectory
             self.predicted_trajectory = pred_xyz_corrected.cpu().numpy()[0]  # (num_timesteps, 3)
+
+            # Analyze trajectory offset (debug)
+            self._analyze_trajectory_offset()
 
             # Delete intermediate tensors to free memory immediately
             del pred_xyz, pred_rot, extra, model_input, sampled_action_tensor
