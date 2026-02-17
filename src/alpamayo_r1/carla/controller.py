@@ -819,7 +819,30 @@ class AlpamayoController:
             # Extract corrected trajectory
             self.predicted_trajectory = pred_xyz_corrected.cpu().numpy()[0]  # (num_timesteps, 3)
 
-            # Analyze trajectory offset (debug)
+            # Apply coordinate offset correction
+            # Unicycle model expects origin at rear axle, but CARLA uses vehicle center
+            # Calculate rear axle position and shift trajectory accordingly
+            try:
+                bbox = self.ego_vehicle.bounding_box
+                # Rear axle is approximately at rear bumper + small offset
+                rear_axle_x = bbox.location.x - bbox.extent.x + 0.5  # ~0.5m from rear bumper
+
+                # Calculate offset: how far trajectory start is from rear axle
+                traj_start_x = self.predicted_trajectory[0, 0]
+                offset_correction = traj_start_x - rear_axle_x
+
+                # Apply correction: shift entire trajectory backward to align with rear axle
+                if abs(offset_correction) > 0.1:  # Only correct if offset > 10cm
+                    self.predicted_trajectory[:, 0] -= offset_correction
+
+                    # Log correction (only first time and every 50 steps)
+                    if self.step_count == 1 or self.step_count % 50 == 0:
+                        print(f"[Trajectory Correction] Applied offset: -{offset_correction:.3f}m "
+                              f"(rear axle: {rear_axle_x:.3f}m, traj start: {traj_start_x:.3f}m)")
+            except (AttributeError, RuntimeError):
+                pass  # Vehicle destroyed or bbox not available
+
+            # Analyze trajectory offset (debug - after correction)
             self._analyze_trajectory_offset()
 
             # Delete intermediate tensors to free memory immediately
