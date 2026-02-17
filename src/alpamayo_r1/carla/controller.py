@@ -453,13 +453,14 @@ class AlpamayoController:
         self.step_count += 1
         self.world_snapshot = world_snapshot
 
-        # Update ego state
-        self._update_ego_state()
-
         # Run model inference at control frequency (10Hz)
-        # Only store images when inference is needed to save memory
+        # Update ego state and run inference at the same frequency
         if self.step_count - self.last_control_step >= (1.0 / self.control_frequency) * 20:
-            self.current_images = camera_images  # Only store when needed
+            # Update ego state at 10Hz (same as model training frequency)
+            self._update_ego_state()
+
+            # Store images and run inference
+            self.current_images = camera_images
             self._run_inference()
             self.last_control_step = self.step_count
 
@@ -553,12 +554,37 @@ class AlpamayoController:
                     return_extra=True,
                 )
 
-            # Extract predicted trajectory (use first sample)
-            # pred_xyz shape: [batch_size, num_traj_sets, num_traj_samples, num_timesteps, 3]
-            self.predicted_trajectory = pred_xyz.cpu().numpy()[0, 0, 0]  # (num_timesteps, 3)
+            # Get sampled action from extra
+            sampled_action = extra["sampled_action"]  # (1, 1, 1, 64, 2)
+            sampled_action_tensor = torch.from_numpy(sampled_action[0, 0, 0]).float().to("cuda")  # (64, 2)
+
+            # Get current actual speed
+            current_velocity = self.ego_vehicle.get_velocity()
+            current_speed = np.sqrt(
+                current_velocity.x**2 + current_velocity.y**2 + current_velocity.z**2
+            )
+
+            # Prepare correct initial state with actual speed
+            t0_states = {"v": torch.tensor([[current_speed]], device="cuda", dtype=torch.float32)}
+
+            # Get ego history for action_to_traj
+            ego_history_xyz = model_input["ego_history_xyz"]  # (1, 1, 16, 3)
+            ego_history_rot = model_input["ego_history_rot"]  # (1, 1, 16, 3, 3)
+
+            # Recompute trajectory with correct initial speed
+            pred_xyz_corrected, pred_rot_corrected = self.model.action_space.action_to_traj(
+                sampled_action_tensor.unsqueeze(0),  # (1, 64, 2)
+                ego_history_xyz[:, -1],  # (1, 16, 3)
+                ego_history_rot[:, -1],  # (1, 16, 3, 3)
+                t0_states=t0_states
+            )
+
+            # Extract corrected trajectory
+            self.predicted_trajectory = pred_xyz_corrected.cpu().numpy()[0]  # (num_timesteps, 3)
 
             # Delete intermediate tensors to free memory immediately
-            del pred_xyz, pred_rot, extra, model_input
+            del pred_xyz, pred_rot, extra, model_input, sampled_action_tensor
+            del pred_xyz_corrected, pred_rot_corrected
 
             # Clear CUDA cache to free memory for next inference
             torch.cuda.empty_cache()
@@ -732,6 +758,59 @@ class AlpamayoController:
         trajectory[:, 0] = np.linspace(0, 10, T)  # 10m forward
         return trajectory
 
+    def _calculate_trajectory_length(self, trajectory: np.ndarray) -> float:
+        """Calculate total length of trajectory polyline in XY plane.
+
+        Args:
+            trajectory: (N, 3) array [x, y, z]
+
+        Returns:
+            total_length: Total polyline length in meters
+        """
+        positions_2d = trajectory[:, :2]
+        deltas = np.diff(positions_2d, axis=0)
+        distances = np.linalg.norm(deltas, axis=1)
+        total_length = np.sum(distances)
+        return total_length
+
+    def _get_speed_reduction_factor(self) -> float:
+        """Calculate speed reduction factor based on trajectory length.
+
+        If predicted trajectory is shorter than expected (indicating
+        stopping or slowing intention), reduce speed proportionally.
+
+        Returns:
+            speed_factor: Multiplier for speed limit (0.1 to 1.0)
+        """
+        if self.predicted_trajectory is None or len(self.predicted_trajectory) < 20:
+            return 1.0
+
+        # Use 2 seconds ahead (20 waypoints at 0.1s interval)
+        trajectory_subset = self.predicted_trajectory[:20]
+        actual_length = self._calculate_trajectory_length(trajectory_subset)
+
+        # Expected length based on current road speed limit
+        reference_speed = self._get_carla_speed_limit()  # Use actual speed limit
+        time_horizon = 2.0  # seconds
+        expected_length = reference_speed * time_horizon
+
+        # Calculate length ratio
+        length_ratio = actual_length / expected_length
+
+        # Apply speed reduction if trajectory is significantly shorter
+        reduction_threshold = 0.75  # Start reducing below 75% of expected
+        if length_ratio < reduction_threshold:
+            # Linear reduction from threshold to minimum
+            speed_factor = max(0.1, length_ratio / reduction_threshold)
+
+            if self.step_count % 20 == 0:
+                print(f"[Speed Reduction] Trajectory length: {actual_length:.1f}m / {expected_length:.1f}m "
+                      f"(ratio: {length_ratio:.2f}) -> factor: {speed_factor:.2f}")
+
+            return speed_factor
+        else:
+            return 1.0
+
     def _get_carla_speed_limit(self) -> float:
         """Get speed limit at current ego vehicle location from CARLA API.
 
@@ -757,6 +836,10 @@ class AlpamayoController:
 
         # Get speed limit from CARLA
         target_speed = self._get_carla_speed_limit()
+
+        # Apply speed reduction based on trajectory length
+        speed_reduction_factor = self._get_speed_reduction_factor()
+        target_speed *= speed_reduction_factor
 
         # Lateral control using Pure Pursuit algorithm
         # Get current speed for speed-dependent lookahead

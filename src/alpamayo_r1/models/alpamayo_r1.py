@@ -328,6 +328,12 @@ class AlpamayoR1(ReasoningVLA):
                 extra[text_tokens] = np.array(extra[text_tokens]).reshape(
                     [input_ids.shape[0], num_traj_sets, num_traj_samples]
                 )
+
+            # Add sampled action to extra for trajectory recomputation
+            extra["sampled_action"] = sampled_action.cpu().reshape(
+                input_ids.shape[0], num_traj_sets, num_traj_samples, -1, 2
+            )
+
             return pred_xyz, pred_rot, extra
         return pred_xyz, pred_rot
 
