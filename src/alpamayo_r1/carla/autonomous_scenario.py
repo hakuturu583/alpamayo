@@ -150,6 +150,11 @@ def main():
         torch.backends.cuda.matmul.allow_tf32 = True
         torch.backends.cudnn.allow_tf32 = True
 
+        # Use magma for linear algebra to avoid cuSOLVER initialization issues
+        # cuSOLVER can fail with CUSOLVER_STATUS_INTERNAL_ERROR in some environments
+        print("Setting PyTorch linear algebra backend to 'magma'...")
+        torch.backends.cuda.preferred_linalg_library("magma")
+
         try:
             # Clear CUDA cache before loading model
             torch.cuda.empty_cache()
