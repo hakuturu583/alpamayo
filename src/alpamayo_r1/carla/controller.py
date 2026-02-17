@@ -1121,6 +1121,13 @@ class AlpamayoController:
             self.min_lookahead_distance
         )
 
+        # Limit lookahead to trajectory range (90% of max to avoid overshoot)
+        # This is important when trajectory is short (e.g., stopping intention)
+        max_traj_distance = np.sqrt(
+            self.predicted_trajectory[-1, 0]**2 + self.predicted_trajectory[-1, 1]**2
+        )
+        lookahead_distance_desired = min(lookahead_distance_desired, max_traj_distance * 0.9)
+
         # Find waypoint closest to desired lookahead distance
         best_idx = 0
         min_diff = float('inf')
