@@ -492,21 +492,14 @@ class CARLASimulation:
         """Clean up all actors and restore settings."""
         print("Cleaning up CARLA simulation...")
 
-        # NOTE: Don't touch cameras and ego_vehicle here - they are managed by scenario
-        # Cameras are attached to ego_vehicle and will be destroyed automatically
-        # when scenario.cleanup() destroys the ego_vehicle
-        # Attempting to stop() or destroy() them here can cause double-free errors
+        # NOTE: Don't touch cameras, ego_vehicle, or world settings here
+        # scenario.cleanup() has already reloaded the map, which:
+        # 1. Destroys all actors automatically
+        # 2. Creates a new world object (making self.world invalid)
+        # 3. Resets all settings to default
+        # Any attempt to access self.world here will fail with "destroyed actor" error
 
-        # Restore asynchronous mode
-        if self.world is not None:
-            try:
-                settings = self.world.get_settings()
-                settings.synchronous_mode = False
-                self.world.apply_settings(settings)
-            except RuntimeError:
-                pass  # World might be invalid
-
-        # Clear references (but don't destroy actors)
+        # Clear references only (actors are already cleaned up by map reload)
         self.cameras.clear()
         self.camera_queues.clear()
         self.ego_vehicle = None
