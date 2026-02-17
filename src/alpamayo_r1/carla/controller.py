@@ -1077,6 +1077,67 @@ class AlpamayoController:
         else:
             return 1.0
 
+    def _calculate_curvature_speed_limit(self, max_lateral_accel: float = 4.0) -> float:
+        """Calculate safe speed limit based on trajectory curvature.
+
+        Uses the relationship: lateral_accel = v² × curvature
+        Therefore: v_safe = sqrt(max_lateral_accel / curvature)
+
+        Args:
+            max_lateral_accel: Maximum comfortable lateral acceleration [m/s²]
+                              Typical values: 2-4 m/s² (comfort), 6-8 m/s² (sport)
+
+        Returns:
+            speed_limit: Safe speed for the trajectory's curvature [m/s]
+                        Returns a large value (100 m/s) if trajectory is nearly straight
+        """
+        if self.predicted_trajectory is None or len(self.predicted_trajectory) < 3:
+            return 100.0  # No limit if no trajectory
+
+        # Analyze curvature in lookahead range (next 3 seconds, 30 waypoints)
+        lookahead_steps = min(30, len(self.predicted_trajectory))
+        trajectory_subset = self.predicted_trajectory[:lookahead_steps]
+
+        # Calculate curvature using finite differences
+        # positions: (x, y) in 2D
+        positions = trajectory_subset[:, :2]  # (N, 2)
+
+        # First derivatives (velocity direction)
+        dx = np.gradient(positions[:, 0])
+        dy = np.gradient(positions[:, 1])
+
+        # Second derivatives (acceleration direction)
+        ddx = np.gradient(dx)
+        ddy = np.gradient(dy)
+
+        # Curvature formula: κ = |dx*ddy - dy*ddx| / (dx² + dy²)^(3/2)
+        numerator = np.abs(dx * ddy - dy * ddx)
+        denominator = np.power(dx**2 + dy**2, 1.5)
+
+        # Avoid division by zero
+        denominator = np.maximum(denominator, 1e-6)
+        curvatures = numerator / denominator
+
+        # Get maximum curvature in lookahead range
+        max_curvature = np.max(curvatures)
+
+        # Calculate safe speed
+        # If curvature is very small (nearly straight), no speed limit
+        min_curvature_threshold = 0.01  # 1/m (radius > 100m)
+        if max_curvature < min_curvature_threshold:
+            return 100.0  # No limit for straight roads
+
+        # v_safe = sqrt(lateral_accel / curvature)
+        safe_speed = np.sqrt(max_lateral_accel / max_curvature)
+
+        # Log speed limit calculation (every 20 steps)
+        if self.step_count % 20 == 0:
+            radius = 1.0 / max_curvature if max_curvature > 1e-6 else float('inf')
+            print(f"[Curvature Speed Limit] Max curvature: {max_curvature:.4f} (1/m), "
+                  f"Radius: {radius:.1f}m → Safe speed: {safe_speed:.1f} m/s ({safe_speed*3.6:.1f} km/h)")
+
+        return safe_speed
+
     def _get_carla_speed_limit(self) -> float:
         """Get speed limit at current ego vehicle location from CARLA API.
 
@@ -1106,6 +1167,10 @@ class AlpamayoController:
         # Apply speed reduction based on trajectory length
         speed_reduction_factor = self._get_speed_reduction_factor()
         target_speed *= speed_reduction_factor
+
+        # Apply curvature-based speed limit (for safe cornering)
+        curvature_speed_limit = self._calculate_curvature_speed_limit(max_lateral_accel=4.0)
+        target_speed = min(target_speed, curvature_speed_limit)
 
         # Lateral control using Pure Pursuit algorithm
         # Get current speed for speed-dependent lookahead
