@@ -70,6 +70,12 @@ class BaseScenario(ABC):
         # Spawn point management
         self.available_spawn_points = []
 
+        # Random seed for spawn point selection
+        self.seed = self.config.get("seed", 0)
+        import numpy as np
+        np.random.seed(self.seed)
+        print(f"Random seed set to {self.seed} for spawn point selection")
+
         # Cleanup flag to prevent multiple cleanups
         self._cleaned_up = False
 
@@ -306,16 +312,21 @@ class BaseScenario(ABC):
                 print(f"Failed to spawn at provided spawn point: {e}")
                 print("Trying alternative spawn points...")
 
-        # Get all spawn points and try them sequentially
+        # Get all spawn points and shuffle them based on seed
+        import numpy as np
+
         all_spawn_points = self.world.get_map().get_spawn_points()
         if len(all_spawn_points) == 0:
             raise RuntimeError("No spawn points available on this map")
 
-        spawn_idx = self.config.get("spawn_point_index", 0)
+        # Create shuffled list of indices (deterministic based on seed)
+        spawn_indices = list(range(len(all_spawn_points)))
+        np.random.shuffle(spawn_indices)
+
         max_attempts = min(10, len(all_spawn_points))  # Try up to 10 spawn points
 
         for attempt in range(max_attempts):
-            try_idx = (spawn_idx + attempt) % len(all_spawn_points)
+            try_idx = spawn_indices[attempt]
             try_point = all_spawn_points[try_idx]
 
             try:
@@ -395,6 +406,9 @@ class BaseScenario(ABC):
             f"Found {len(valid_spawn_points)} valid spawn points "
             f"(min distance: {min_distance_from_ego}m)"
         )
+
+        # Shuffle spawn points for random selection (deterministic based on seed)
+        np.random.shuffle(valid_spawn_points)
 
         # Limit to valid spawn points
         num_to_spawn = min(num_vehicles, len(valid_spawn_points))

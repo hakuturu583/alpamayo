@@ -110,6 +110,12 @@ def main():
         action="store_true",
         help="Disable video recording to test if it causes segfault",
     )
+    parser.add_argument(
+        "--seed",
+        type=int,
+        default=0,
+        help="Random seed for spawn point selection (default: 0)",
+    )
 
     args = parser.parse_args()
 
@@ -120,6 +126,7 @@ def main():
     print(f"  Pedestrian NPCs: {args.num_pedestrians}")
     print(f"  Simulation steps: {args.num_steps}")
     print(f"  Target speed: {args.target_speed} m/s ({args.target_speed * 3.6:.1f} km/h)")
+    print(f"  Random seed: {args.seed}")
 
     # Load model unless --no-model is specified
     model = None
@@ -189,6 +196,7 @@ def main():
             "num_vehicles": args.num_vehicles,
             "num_pedestrians": args.num_pedestrians,
             "spawn_point_index": args.spawn_point,
+            "seed": args.seed,
         }
 
         scenario = AutonomousDrivingScenario(
