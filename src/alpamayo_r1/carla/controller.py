@@ -652,9 +652,14 @@ class AlpamayoController:
         # Get camera state for debugging
         front_camera = self.cameras.get("camera_front_wide_120fov")
         if front_camera is not None:
-            camera_transform = front_camera.get_transform()
-            camera_location = camera_transform.location
-            camera_attached = front_camera.is_attached_to(self.ego_vehicle)
+            try:
+                camera_transform = front_camera.get_transform()
+                camera_location = camera_transform.location
+                # Note: Sensors don't have is_attached_to() method
+                camera_attached = True  # Assume attached if we can get transform
+            except RuntimeError:
+                camera_location = None
+                camera_attached = False
         else:
             camera_location = None
             camera_attached = False
