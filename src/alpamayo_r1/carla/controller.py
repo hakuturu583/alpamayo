@@ -278,10 +278,22 @@ class AlpamayoController:
         Returns:
             Image with HUD overlay in BGR format
         """
+        # Check if vehicle is still alive before accessing
+        try:
+            if not self.ego_vehicle.is_alive:
+                return image_bgr
+        except RuntimeError:
+            # Actor already destroyed
+            return image_bgr
+
         # Get current vehicle state
-        velocity = self.ego_vehicle.get_velocity()
-        speed = np.sqrt(velocity.x**2 + velocity.y**2 + velocity.z**2)
-        location = self.ego_vehicle.get_transform().location
+        try:
+            velocity = self.ego_vehicle.get_velocity()
+            speed = np.sqrt(velocity.x**2 + velocity.y**2 + velocity.z**2)
+            location = self.ego_vehicle.get_transform().location
+        except RuntimeError:
+            # Actor destroyed during access
+            return image_bgr
 
         # Create semi-transparent overlay for HUD
         overlay = image_bgr.copy()
@@ -720,10 +732,18 @@ class AlpamayoController:
     def close(self) -> None:
         """Clean up resources (close video writer)."""
         if self.video_writer is not None:
-            self.video_writer.release()
-            print(f"Video saved to: {self.video_path}")
-            self.video_writer = None
+            try:
+                self.video_writer.release()
+                print(f"Video saved to: {self.video_path}")
+            except Exception as e:
+                print(f"Warning: Error releasing video writer: {e}")
+            finally:
+                self.video_writer = None
 
     def __del__(self) -> None:
         """Destructor to ensure video writer is closed."""
-        self.close()
+        try:
+            self.close()
+        except Exception:
+            # Ignore errors during cleanup
+            pass

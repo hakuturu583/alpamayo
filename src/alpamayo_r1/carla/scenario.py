@@ -70,6 +70,9 @@ class BaseScenario(ABC):
         # Spawn point management
         self.available_spawn_points = []
 
+        # Cleanup flag to prevent multiple cleanups
+        self._cleaned_up = False
+
     @abstractmethod
     def setup(self) -> None:
         """Set up the scenario.
@@ -143,12 +146,21 @@ class BaseScenario(ABC):
         This method destroys all actors spawned during the scenario to prevent
         memory leaks and ensure clean state for subsequent scenarios.
         """
+        # Prevent multiple cleanups
+        if self._cleaned_up:
+            return
+
         print("Cleaning up scenario...")
+        self._cleaned_up = True
 
         # Close Alpamayo controller (saves video)
         if self.alpamayo_controller is not None:
-            self.alpamayo_controller.close()
-            self.alpamayo_controller = None
+            try:
+                self.alpamayo_controller.close()
+            except Exception as e:
+                print(f"Warning: Error closing controller: {e}")
+            finally:
+                self.alpamayo_controller = None
 
         # Stop pedestrian controllers first
         for controller in self.pedestrian_controllers:
