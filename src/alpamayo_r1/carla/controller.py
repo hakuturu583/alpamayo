@@ -558,9 +558,15 @@ class AlpamayoController:
             sampled_action = extra["sampled_action"]  # (1, 1, 1, 64, 2) Tensor
             sampled_action_tensor = sampled_action[0, 0, 0].float().to("cuda")  # (64, 2)
 
-            # Debug: Print normalized action statistics
+            # Scale curvature to make trajectories more curved
+            # Model's curvature_std is 0.026, which is too small
+            # Scale by 3-4x to get more reasonable steering
+            curvature_scale = 3.5
+            sampled_action_tensor[:, 1] *= curvature_scale
+
+            # Debug: Print action statistics (before scaling)
             accel_normalized = sampled_action_tensor[:, 0].cpu().numpy()
-            curvature_normalized = sampled_action_tensor[:, 1].cpu().numpy()
+            curvature_normalized_original = sampled_action[0, 0, 0, :, 1].cpu().numpy()  # Before scaling
 
             # Denormalize to get real values (convert from BFloat16 to float32 first)
             accel_std = self.model.action_space.accel_std.cpu().float().numpy()
@@ -569,12 +575,17 @@ class AlpamayoController:
             curv_mean = self.model.action_space.curvature_mean.cpu().float().numpy()
 
             accel_real = accel_normalized * accel_std + accel_mean
-            curvature_real = curvature_normalized * curv_std + curv_mean
+            curvature_real_original = curvature_normalized_original * curv_std + curv_mean
 
-            print(f"[Action] Normalized - Accel: [{accel_normalized.min():.2f}, {accel_normalized.max():.2f}], "
-                  f"Curvature: [{curvature_normalized.min():.2f}, {curvature_normalized.max():.2f}]")
-            print(f"[Action] Real - Accel: [{accel_real.min():.3f}, {accel_real.max():.3f}] m/s², "
-                  f"Curvature: [{curvature_real.min():.4f}, {curvature_real.max():.4f}] 1/m (radius: {1/max(abs(curvature_real.min()), abs(curvature_real.max())):.1f}m)")
+            # Curvature after scaling (3.5x)
+            curvature_normalized_scaled = sampled_action_tensor[:, 1].cpu().numpy()
+            curvature_real_scaled = curvature_normalized_scaled * curv_std + curv_mean
+
+            print(f"[Action] Accel: [{accel_real.min():.3f}, {accel_real.max():.3f}] m/s²")
+            print(f"[Action] Curvature (original): [{curvature_real_original.min():.4f}, {curvature_real_original.max():.4f}] 1/m "
+                  f"-> radius: {1/max(abs(curvature_real_original.min()), abs(curvature_real_original.max()), 1e-6):.1f}m")
+            print(f"[Action] Curvature (scaled 3.5x): [{curvature_real_scaled.min():.4f}, {curvature_real_scaled.max():.4f}] 1/m "
+                  f"-> radius: {1/max(abs(curvature_real_scaled.min()), abs(curvature_real_scaled.max()), 1e-6):.1f}m")
 
             # Get current actual speed
             current_velocity = self.ego_vehicle.get_velocity()
