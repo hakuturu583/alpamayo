@@ -32,7 +32,7 @@ class AlpamayoController:
         processor: Any = None,
         control_frequency: float = 10.0,
         save_video: bool = True,
-        video_path: str = "trajectory_visualization.mp4",
+        log_dir: str = None,
     ):
         """Initialize Alpamayo controller.
 
@@ -43,7 +43,7 @@ class AlpamayoController:
             processor: Model processor/tokenizer instance (optional)
             control_frequency: Control update frequency in Hz (default: 10Hz)
             save_video: Whether to save visualization video (default: True)
-            video_path: Path to save video (default: trajectory_visualization.mp4)
+            log_dir: Directory to save video logs (default: log/YYYYMMDD_HHMMSS)
         """
         self.ego_vehicle = ego_vehicle
         self.cameras = cameras
@@ -51,7 +51,18 @@ class AlpamayoController:
         self.processor = processor
         self.control_frequency = control_frequency
         self.save_video = save_video
-        self.video_path = video_path
+
+        # Create log directory with timestamp
+        if log_dir is None:
+            from datetime import datetime
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            log_dir = f"log/{timestamp}"
+        self.log_dir = log_dir
+
+        if self.save_video:
+            import os
+            os.makedirs(self.log_dir, exist_ok=True)
+            print(f"Video logs will be saved to: {self.log_dir}")
 
         # Control parameters
         self.target_speed = 5.0  # m/s (about 18 km/h)
@@ -77,6 +88,9 @@ class AlpamayoController:
 
         # Video writer for trajectory visualization
         self.video_writer = None
+        self.video_frame_count = 0
+        self.video_segment_index = 0
+        self.frames_per_segment = 100
         if self.save_video:
             self._init_video_writer()
 
@@ -107,15 +121,27 @@ class AlpamayoController:
 
     def _init_video_writer(self) -> None:
         """Initialize video writer for trajectory visualization."""
+        # Close existing writer if any
+        if self.video_writer is not None:
+            try:
+                self.video_writer.release()
+            except Exception:
+                pass
+
+        # Generate filename with segment index
+        video_filename = f"trajectory_{self.video_segment_index:03d}.mp4"
+        video_path = f"{self.log_dir}/{video_filename}"
+
         # Video parameters (1920x1080 at 20 FPS to match CARLA simulation)
         fourcc = cv2.VideoWriter_fourcc(*'mp4v')
         self.video_writer = cv2.VideoWriter(
-            self.video_path,
+            video_path,
             fourcc,
             20.0,  # FPS (CARLA default)
             (1920, 1080)  # Resolution
         )
-        print(f"Initialized video writer: {self.video_path}")
+        print(f"Initialized video writer: {video_path}")
+        self.video_frame_count = 0
 
     def _init_camera_params(self) -> None:
         """Initialize camera parameters for projection."""
@@ -440,6 +466,11 @@ class AlpamayoController:
         Args:
             camera_images: Dictionary mapping camera names to RGB images
         """
+        # Check if we need to start a new video segment
+        if self.video_frame_count >= self.frames_per_segment:
+            self.video_segment_index += 1
+            self._init_video_writer()
+
         # Get front wide camera image
         front_image = camera_images.get("camera_front_wide_120fov")
         if front_image is None:
@@ -459,6 +490,7 @@ class AlpamayoController:
 
         # Write frame to video
         self.video_writer.write(frame_bgr)
+        self.video_frame_count += 1
 
     def _update_ego_state(self) -> None:
         """Update ego vehicle state history."""
@@ -842,7 +874,7 @@ class AlpamayoController:
         if self.video_writer is not None:
             try:
                 self.video_writer.release()
-                print(f"Video saved to: {self.video_path}")
+                print(f"Videos saved to: {self.log_dir}/ (segments: 0-{self.video_segment_index})")
             except Exception as e:
                 print(f"Warning: Error releasing video writer: {e}")
             finally:

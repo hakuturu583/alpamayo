@@ -111,12 +111,18 @@ class BaseScenario(ABC):
             cameras: Dictionary mapping camera names to camera actors
         """
         if self.use_alpamayo_control and self.ego_vehicle is not None:
+            # Create log directory with timestamp for this scenario run
+            from datetime import datetime
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            log_dir = f"log/{timestamp}"
+
             self.alpamayo_controller = AlpamayoController(
                 ego_vehicle=self.ego_vehicle,
                 cameras=cameras,
                 model=self.model,
                 processor=self.processor,
                 control_frequency=10.0,
+                log_dir=log_dir,
             )
             print("Alpamayo controller initialized")
 
