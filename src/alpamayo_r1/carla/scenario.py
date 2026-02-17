@@ -143,8 +143,8 @@ class BaseScenario(ABC):
     def cleanup(self) -> None:
         """Clean up all spawned actors.
 
-        This method destroys all actors spawned during the scenario to prevent
-        memory leaks and ensure clean state for subsequent scenarios.
+        This method reloads the map to automatically clean up all actors,
+        which is safer than manually destroying each actor individually.
         """
         # Prevent multiple cleanups
         if self._cleaned_up:
@@ -153,7 +153,7 @@ class BaseScenario(ABC):
         print("Cleaning up scenario...")
         self._cleaned_up = True
 
-        # Close Alpamayo controller (saves video)
+        # Close Alpamayo controller (saves video) before reloading world
         if self.alpamayo_controller is not None:
             try:
                 self.alpamayo_controller.close()
@@ -162,13 +162,37 @@ class BaseScenario(ABC):
             finally:
                 self.alpamayo_controller = None
 
+        # Reload the map to automatically clean up all actors
+        # This is safer and more reliable than manually destroying each actor
+        try:
+            current_map = self.world.get_map().name
+            print(f"Reloading map '{current_map}' to clean up all actors...")
+            self.client.load_world(current_map)
+            print("Map reloaded successfully")
+        except Exception as e:
+            print(f"Warning: Failed to reload map: {e}")
+            print("Falling back to manual actor cleanup...")
+            # Fallback: manual cleanup if reload fails
+            self._manual_cleanup()
+
+        # Clear lists
+        self.sensors.clear()
+        self.pedestrian_controllers.clear()
+        self.pedestrian_npcs.clear()
+        self.vehicle_npcs.clear()
+        self.ego_vehicle = None
+
+        print("Scenario cleanup complete.")
+
+    def _manual_cleanup(self) -> None:
+        """Fallback manual cleanup method if map reload fails."""
         # Stop pedestrian controllers first
         for controller in self.pedestrian_controllers:
             try:
                 if controller is not None and controller.is_alive:
                     controller.stop()
             except (RuntimeError, AttributeError):
-                pass  # Already destroyed or invalid
+                pass
 
         # Destroy all actors
         actors_to_destroy = (
@@ -186,24 +210,14 @@ class BaseScenario(ABC):
             if actor is None:
                 continue
             try:
-                # Check if actor is alive before destroying
                 if actor.is_alive:
                     actor.destroy()
                     destroyed_count += 1
             except (RuntimeError, AttributeError):
-                pass  # Already destroyed or invalid
+                pass
 
         if destroyed_count > 0:
             print(f"Destroyed {destroyed_count} actors")
-
-        # Clear lists
-        self.sensors.clear()
-        self.pedestrian_controllers.clear()
-        self.pedestrian_npcs.clear()
-        self.vehicle_npcs.clear()
-        self.ego_vehicle = None
-
-        print("Scenario cleanup complete.")
 
     def on_collision(self, event: Any) -> None:
         """Handle collision events.
