@@ -1,5 +1,6 @@
 """Alpamayo R1 model-based controller for CARLA ego vehicle."""
 
+from collections import deque
 from typing import Any
 
 import carla
@@ -84,6 +85,11 @@ class AlpamayoController:
         self.predicted_trajectory = None
         self.current_images = {}
         self.world_snapshot = None
+
+        # Rolling camera frame buffer: stores last NUM_FRAME_HISTORY frames per camera
+        # Matches training data: [t0-0.3s, t0-0.2s, t0-0.1s, t0] at 10Hz
+        self.NUM_FRAME_HISTORY = 4
+        self.camera_frame_buffer: dict[str, deque] = {}
 
         # Language traces (CoT, meta action, answer)
         self.latest_cot = ""
@@ -741,8 +747,9 @@ class AlpamayoController:
             # Update ego state at 10Hz (same as model training frequency)
             self._update_ego_state()
 
-            # Store images and run inference
+            # Store images, update rolling buffer, and run inference
             self.current_images = camera_images
+            self._update_camera_buffer(camera_images)
             self._run_inference()
             self.last_control_step = self.step_count
 
@@ -753,6 +760,24 @@ class AlpamayoController:
         # Save visualization video
         if self.save_video and self.video_writer is not None:
             self._save_visualization_frame(camera_images)
+
+    def _update_camera_buffer(self, camera_images: dict[str, np.ndarray]) -> None:
+        """Update rolling frame buffer with the latest camera images.
+
+        Converts each image to a (C, H, W) tensor and appends it to the
+        per-camera deque (maxlen=NUM_FRAME_HISTORY).  The buffer accumulates
+        frames over time at the inference frequency (10 Hz), mirroring the
+        training data layout: [t0-0.3s, t0-0.2s, t0-0.1s, t0].
+
+        Args:
+            camera_images: Dictionary mapping camera names to RGB images (H, W, 3)
+        """
+        for cam_name, image in camera_images.items():
+            if cam_name not in self.camera_frame_buffer:
+                self.camera_frame_buffer[cam_name] = deque(maxlen=self.NUM_FRAME_HISTORY)
+            img_tensor = torch.from_numpy(image.copy()).float()
+            img_tensor = rearrange(img_tensor, "h w c -> c h w")
+            self.camera_frame_buffer[cam_name].append(img_tensor)
 
     def _save_visualization_frame(self, camera_images: dict[str, np.ndarray]) -> None:
         """Save current frame with trajectory visualization to video.
@@ -911,8 +936,7 @@ class AlpamayoController:
                     print(f"[Meta Action] {self.latest_meta_action}")
 
             # Scale curvature to compensate for small curvature_std (0.026)
-            # Increased from 5x to 10x for sharper turns
-            curvature_scale = 10.0
+            curvature_scale = 4.0
             sampled_action_tensor[:, 1] *= curvature_scale
 
             # Debug: Print action statistics (before scaling)
@@ -928,12 +952,12 @@ class AlpamayoController:
             accel_real = accel_normalized * accel_std + accel_mean
             curvature_real_original = curvature_normalized_original * curv_std + curv_mean
 
-            # Curvature after scaling (5x)
+            # Curvature after scaling (4x)
             curvature_normalized_scaled = sampled_action_tensor[:, 1].cpu().numpy()
             curvature_real_scaled = curvature_normalized_scaled * curv_std + curv_mean
 
             print(f"[Action] Accel: [{accel_real.min():.3f}, {accel_real.max():.3f}] m/s²")
-            print(f"[Action] Curvature (scaled 10x): [{curvature_real_scaled.min():.4f}, {curvature_real_scaled.max():.4f}] 1/m "
+            print(f"[Action] Curvature (scaled 4x): [{curvature_real_scaled.min():.4f}, {curvature_real_scaled.max():.4f}] 1/m "
                   f"-> radius: {1/max(abs(curvature_real_scaled.min()), abs(curvature_real_scaled.max()), 1e-6):.1f}m")
 
             # Get current actual speed
@@ -1046,18 +1070,26 @@ class AlpamayoController:
             key=lambda x: camera_name_to_index.get(x[0], 999)
         )
 
-        image_list = []
-        for cam_name, image in sorted_cameras:
-            # Use native resolution (same as test_inference.py)
-            # CARLA provides 1920x1080 images
-            # Convert to tensor (H, W, C) -> (C, H, W)
-            # Copy the array to ensure it's writable and has positive strides
-            img_tensor = torch.from_numpy(image.copy()).float()
-            img_tensor = rearrange(img_tensor, "h w c -> c h w")
-            image_list.append(img_tensor)
+        # Build (N_cameras, NUM_FRAME_HISTORY, C, H, W) from rolling buffer,
+        # then flatten to (N_cameras * NUM_FRAME_HISTORY, C, H, W) to match
+        # the training data layout used in test_inference.py.
+        camera_frames = []
+        for cam_name, _ in sorted_cameras:
+            buf = self.camera_frame_buffer.get(cam_name)
+            if buf is None or len(buf) == 0:
+                # Buffer not yet filled: repeat the current image
+                img = torch.from_numpy(self.current_images[cam_name].copy()).float()
+                img = rearrange(img, "h w c -> c h w")
+                frames_for_cam = [img] * self.NUM_FRAME_HISTORY
+            else:
+                frames_for_cam = list(buf)
+                # Pad front with oldest frame when buffer has fewer than NUM_FRAME_HISTORY entries
+                while len(frames_for_cam) < self.NUM_FRAME_HISTORY:
+                    frames_for_cam.insert(0, frames_for_cam[0])
+            camera_frames.append(torch.stack(frames_for_cam, dim=0))  # (NUM_FRAME_HISTORY, C, H, W)
 
-        # Stack images: (N_cameras, C, H, W)
-        images = torch.stack(image_list, dim=0)
+        # (N_cameras, NUM_FRAME_HISTORY, C, H, W) -> (N_cameras * NUM_FRAME_HISTORY, C, H, W)
+        images = torch.stack(camera_frames, dim=0).flatten(0, 1)
 
         # Get current vehicle speed
         current_velocity = self.ego_vehicle.get_velocity()

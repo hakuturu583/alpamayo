@@ -35,7 +35,7 @@ class CameraConfig:
             "index": 0,
             "fov": 120.0,
             "transform": carla.Transform(
-                carla.Location(x=0.0, y=1.2, z=1.5),
+                carla.Location(x=0.0, y=-1.2, z=1.5),
                 carla.Rotation(pitch=0.0, yaw=-90.0, roll=0.0),
             ),
         },
@@ -53,7 +53,7 @@ class CameraConfig:
             "index": 2,
             "fov": 120.0,
             "transform": carla.Transform(
-                carla.Location(x=0.0, y=-1.2, z=1.5),
+                carla.Location(x=0.0, y=1.2, z=1.5),
                 carla.Rotation(pitch=0.0, yaw=90.0, roll=0.0),
             ),
         },
