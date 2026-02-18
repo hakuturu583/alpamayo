@@ -70,8 +70,8 @@ class AlpamayoController:
 
         # Pure pursuit parameters
         self.wheelbase = 3.005  # meters (initial/fallback) - will be updated from CARLA physics
-        self.lookahead_time = 2.5  # seconds (increased for smoother path following)
-        self.min_lookahead_distance = 6.0  # meters (minimum lookahead at low speeds)
+        self.lookahead_time = 2.0  # seconds (reduced from 2.5s for more responsive steering)
+        self.min_lookahead_distance = 4.5  # meters (reduced from 6.0m for sharper turns)
 
         # State tracking
         self.ego_history_xyz = []
@@ -758,7 +758,7 @@ class AlpamayoController:
                     top_p=0.98,
                     temperature=0.6,
                     num_traj_samples=1,
-                    max_generation_length=128,  # Reduced from 256 to save GPU memory
+                    max_generation_length=256,  # Same as test_inference.py
                     return_extra=True,
                 )
 
