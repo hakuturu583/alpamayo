@@ -935,13 +935,9 @@ class AlpamayoController:
                 if self.latest_meta_action:
                     print(f"[Meta Action] {self.latest_meta_action}")
 
-            # Scale curvature to compensate for small curvature_std (0.026)
-            curvature_scale = 4.0
-            sampled_action_tensor[:, 1] *= curvature_scale
-
-            # Debug: Print action statistics (before scaling)
+            # Debug: Print action statistics
             accel_normalized = sampled_action_tensor[:, 0].cpu().numpy()
-            curvature_normalized_original = sampled_action[0, 0, 0, :, 1].cpu().numpy()  # Before scaling
+            curvature_normalized = sampled_action_tensor[:, 1].cpu().numpy()
 
             # Denormalize to get real values (convert from BFloat16 to float32 first)
             accel_std = self.model.action_space.accel_std.cpu().float().numpy()
@@ -950,15 +946,11 @@ class AlpamayoController:
             curv_mean = self.model.action_space.curvature_mean.cpu().float().numpy()
 
             accel_real = accel_normalized * accel_std + accel_mean
-            curvature_real_original = curvature_normalized_original * curv_std + curv_mean
-
-            # Curvature after scaling (4x)
-            curvature_normalized_scaled = sampled_action_tensor[:, 1].cpu().numpy()
-            curvature_real_scaled = curvature_normalized_scaled * curv_std + curv_mean
+            curvature_real = curvature_normalized * curv_std + curv_mean
 
             print(f"[Action] Accel: [{accel_real.min():.3f}, {accel_real.max():.3f}] m/s²")
-            print(f"[Action] Curvature (scaled 4x): [{curvature_real_scaled.min():.4f}, {curvature_real_scaled.max():.4f}] 1/m "
-                  f"-> radius: {1/max(abs(curvature_real_scaled.min()), abs(curvature_real_scaled.max()), 1e-6):.1f}m")
+            print(f"[Action] Curvature: [{curvature_real.min():.4f}, {curvature_real.max():.4f}] 1/m "
+                  f"-> radius: {1/max(abs(curvature_real.min()), abs(curvature_real.max()), 1e-6):.1f}m")
 
             # Get current actual speed
             current_velocity = self.ego_vehicle.get_velocity()
