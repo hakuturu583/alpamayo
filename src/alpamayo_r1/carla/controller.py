@@ -951,9 +951,9 @@ class AlpamayoController:
 
             history_xyz_local = current_rot_inv.apply(history_xyz - current_xyz)
 
-            # CRITICAL: Convert CARLA coordinate system (X=forward, Y=right) to
-            # Alpamayo coordinate system (X=forward, Y=left) by negating Y axis
-            history_xyz_local[:, 1] = -history_xyz_local[:, 1]
+            # NOTE: Keeping CARLA coordinate system (X=forward, Y=right, Z=up) for now
+            # Previous Y-axis inversion was causing left/right confusion
+            # TODO: Verify correct coordinate system from model documentation
 
             history_rot_local = (
                 current_rot_inv * spt.Rotation.from_matrix(history_rot)
@@ -1161,15 +1161,18 @@ class AlpamayoController:
         """Get speed limit at current ego vehicle location from CARLA API.
 
         Returns:
-            speed_limit: Speed limit in m/s
+            speed_limit: Speed limit in m/s (80% of OpenDRIVE limit)
         """
         speed_limit_kmh = self.ego_vehicle.get_speed_limit()
         speed_limit_ms = speed_limit_kmh / 3.6
 
+        # Apply 80% factor to OpenDRIVE speed limit for safer driving
+        speed_limit_ms *= 0.8
+
         speed_limit_ms = min(speed_limit_ms, self.max_speed)
 
         if self.step_count % 20 == 0:
-            print(f"[Speed Limit] {speed_limit_kmh:.0f} km/h ({speed_limit_ms:.1f} m/s)")
+            print(f"[Speed Limit] {speed_limit_kmh:.0f} km/h → {speed_limit_ms:.1f} m/s (80%)")
 
         return speed_limit_ms
 
@@ -1232,12 +1235,12 @@ class AlpamayoController:
         # Pure pursuit: calculate curvature
         # curvature = 2 * sin(alpha) / L, where sin(alpha) ≈ lateral_error / L
         # Simplified: curvature = 2 * lateral_error / L^2
-        # Alpamayo coords: Y=left (positive = target on left)
-        # CARLA control: steer positive = turn left
-        # Therefore: positive target_y → positive curvature → positive steer (NO negative sign!)
+        # CARLA/Standard coords: Y=right (positive = target on right)
+        # CARLA control: steer positive = turn left, negative = turn right
+        # Therefore: positive target_y (right) → negative curvature → negative steer (turn right)
         steering_angle_rad = 0.0  # Initialize for debug output
         if lookahead_distance > 0.1:  # Avoid division by zero
-            curvature = 2.0 * target_y / (lookahead_distance**2)
+            curvature = -2.0 * target_y / (lookahead_distance**2)
 
             # Convert curvature to steering angle (in radians)
             # steering_angle = atan(wheelbase * curvature)
