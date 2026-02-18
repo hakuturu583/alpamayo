@@ -767,8 +767,8 @@ class AlpamayoController:
             sampled_action_tensor = sampled_action[0, 0, 0].float().to("cuda")  # (64, 2)
 
             # Scale curvature to compensate for small curvature_std (0.026)
-            # Empirically tuned to 5x for balanced steering response
-            curvature_scale = 5.0
+            # Increased from 5x to 10x for sharper turns
+            curvature_scale = 10.0
             sampled_action_tensor[:, 1] *= curvature_scale
 
             # Debug: Print action statistics (before scaling)
@@ -789,7 +789,7 @@ class AlpamayoController:
             curvature_real_scaled = curvature_normalized_scaled * curv_std + curv_mean
 
             print(f"[Action] Accel: [{accel_real.min():.3f}, {accel_real.max():.3f}] m/s²")
-            print(f"[Action] Curvature (scaled 5x): [{curvature_real_scaled.min():.4f}, {curvature_real_scaled.max():.4f}] 1/m "
+            print(f"[Action] Curvature (scaled 10x): [{curvature_real_scaled.min():.4f}, {curvature_real_scaled.max():.4f}] 1/m "
                   f"-> radius: {1/max(abs(curvature_real_scaled.min()), abs(curvature_real_scaled.max()), 1e-6):.1f}m")
 
             # Get current actual speed
@@ -951,9 +951,9 @@ class AlpamayoController:
 
             history_xyz_local = current_rot_inv.apply(history_xyz - current_xyz)
 
-            # NOTE: Keeping CARLA coordinate system (X=forward, Y=right, Z=up) for now
-            # Previous Y-axis inversion was causing left/right confusion
-            # TODO: Verify correct coordinate system from model documentation
+            # Convert CARLA coordinate system (X=forward, Y=right) to
+            # model's expected coordinate system (X=forward, Y=left)
+            history_xyz_local[:, 1] = -history_xyz_local[:, 1]
 
             history_rot_local = (
                 current_rot_inv * spt.Rotation.from_matrix(history_rot)
@@ -1235,12 +1235,12 @@ class AlpamayoController:
         # Pure pursuit: calculate curvature
         # curvature = 2 * sin(alpha) / L, where sin(alpha) ≈ lateral_error / L
         # Simplified: curvature = 2 * lateral_error / L^2
-        # CARLA/Standard coords: Y=right (positive = target on right)
+        # Model coords: Y=left (positive = target on left)
         # CARLA control: steer positive = turn left, negative = turn right
-        # Therefore: positive target_y (right) → negative curvature → negative steer (turn right)
+        # Therefore: positive target_y (left) → positive curvature → positive steer (turn left)
         steering_angle_rad = 0.0  # Initialize for debug output
         if lookahead_distance > 0.1:  # Avoid division by zero
-            curvature = -2.0 * target_y / (lookahead_distance**2)
+            curvature = 2.0 * target_y / (lookahead_distance**2)
 
             # Convert curvature to steering angle (in radians)
             # steering_angle = atan(wheelbase * curvature)
