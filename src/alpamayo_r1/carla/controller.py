@@ -758,7 +758,7 @@ class AlpamayoController:
                     top_p=0.98,
                     temperature=0.6,
                     num_traj_samples=1,
-                    max_generation_length=256,  # Same as test_inference.py
+                    max_generation_length=128,  # Reduced from 256 to save GPU memory
                     return_extra=True,
                 )
 
@@ -959,28 +959,19 @@ class AlpamayoController:
                 current_rot_inv * spt.Rotation.from_matrix(history_rot)
             ).as_matrix()
 
-            # Debug: Log ego history to analyze trajectory curvature
-            if self.step_count % 20 == 0:  # Log every 20 steps
-                print(f"\n[DEBUG Ego History] Step: {self.step_count}")
-                print(f"  History length: {num_history} steps")
-                print(f"  Global positions (last 4) - CARLA coords:")
-                for i in range(max(0, num_history-4), num_history):
-                    print(f"    [{i}] xyz: [{history_xyz[i, 0]:7.2f}, {history_xyz[i, 1]:7.2f}, {history_xyz[i, 2]:7.2f}]")
-                print(f"  Local positions (last 4) - Alpamayo coords (Y=left):")
-                for i in range(max(0, num_history-4), num_history):
-                    print(f"    [{i}] xyz: [{history_xyz_local[i, 0]:7.2f}, {history_xyz_local[i, 1]:7.2f}, {history_xyz_local[i, 2]:7.2f}]")
-                # Calculate path curvature from ego history
+            # Debug: Log ego history to analyze trajectory curvature (minimal version to save memory)
+            if self.step_count % 50 == 0:  # Reduced frequency: every 50 steps
+                print(f"\n[DEBUG Ego History] Step: {self.step_count}, Length: {num_history}")
+                # Only log last position for brevity
+                if num_history > 0:
+                    print(f"  Last local pos (Alpamayo Y=left): [{history_xyz_local[-1, 0]:7.2f}, {history_xyz_local[-1, 1]:7.2f}, {history_xyz_local[-1, 2]:7.2f}]")
+                # Simplified curvature calculation (no intermediate arrays stored)
                 if num_history >= 3:
-                    positions_2d = history_xyz_local[:, :2]  # XY plane
-                    dx = np.gradient(positions_2d[:, 0])
-                    dy = np.gradient(positions_2d[:, 1])
-                    ddx = np.gradient(dx)
-                    ddy = np.gradient(dy)
-                    numerator = np.abs(dx * ddy - dy * ddx)
-                    denominator = np.power(dx**2 + dy**2, 1.5)
-                    curvatures = numerator / np.maximum(denominator, 1e-6)
-                    print(f"  Ego history curvature: mean={np.mean(curvatures):.4f}, max={np.max(curvatures):.4f}")
-                print(f"  Current speed: {current_speed:.2f} m/s, Target speed: {target_speed:.2f} m/s")
+                    dx = np.gradient(history_xyz_local[:, 0])
+                    dy = np.gradient(history_xyz_local[:, 1])
+                    curvatures = np.abs(dx * np.gradient(dy) - dy * np.gradient(dx)) / np.power(dx**2 + dy**2 + 1e-6, 1.5)
+                    print(f"  Ego history curvature: max={np.max(curvatures):.4f}")
+                print(f"  Speed: {current_speed:.2f}/{target_speed:.2f} m/s")
 
             # Add batch and temporal dimensions to match expected shape
             ego_history_xyz = torch.from_numpy(history_xyz_local).float()
