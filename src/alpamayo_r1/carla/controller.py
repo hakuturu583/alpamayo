@@ -11,6 +11,7 @@ from einops import rearrange
 from PIL import Image
 
 from alpamayo_r1 import helper
+from alpamayo_r1.carla.decoupled_controller import DecoupledController
 
 
 class AlpamayoController:
@@ -83,6 +84,14 @@ class AlpamayoController:
         self.predicted_trajectory = None
         self.current_images = {}
         self.world_snapshot = None
+
+        # Language traces (CoT, meta action, answer)
+        self.latest_cot = ""
+        self.latest_meta_action = ""
+        self.latest_answer = ""
+
+        # Decoupled controller (initialized after vehicle physics are loaded)
+        self.decoupled_controller = None
 
         # Pre-allocated tensors for padding (VRAM optimization)
         self._cached_padding_tensors = {
@@ -233,6 +242,19 @@ class AlpamayoController:
         print(f"\n  Note: control.steer is NORMALIZED [-1.0, 1.0], NOT in radians!")
         print(f"  Actual angle = control.steer * max_steer_angle")
         print("="*80 + "\n")
+
+        # Initialize decoupled controller with vehicle parameters
+        self.decoupled_controller = DecoupledController(
+            wheelbase=self.wheelbase,
+            max_steering=self.max_steering,
+            lateral_lookahead=15.0,  # Fixed lookahead distance for lateral control
+            min_lookahead_distance=4.5,
+            spline_num_points=200,
+        )
+        print(f"[Decoupled Controller] Initialized with:")
+        print(f"  Lateral lookahead:   {self.decoupled_controller.lateral_lookahead:.1f} m (fixed)")
+        print(f"  Min lookahead:       {self.decoupled_controller.min_lookahead_distance:.1f} m")
+        print(f"  Spline points:       {self.decoupled_controller.spline_num_points}")
 
     def _init_video_writer(self) -> None:
         """Initialize video writer for trajectory visualization."""
@@ -406,6 +428,7 @@ class AlpamayoController:
         if points_2d.shape[0] == 0:
             # Add HUD even if no trajectory
             img_with_hud = self._add_hud_overlay(img_bgr)
+            self._draw_language_traces(img_with_hud)
             return cv2.cvtColor(img_with_hud, cv2.COLOR_BGR2RGB)
 
         # Draw trajectory as connected line segments with gradient color
@@ -451,9 +474,118 @@ class AlpamayoController:
         # Add HUD overlay with vehicle info
         img_with_hud = self._add_hud_overlay(img_bgr)
 
+        # Add language traces overlay
+        self._draw_language_traces(img_with_hud)
+
         # Convert back to RGB
         img_rgb = cv2.cvtColor(img_with_hud, cv2.COLOR_BGR2RGB)
         return img_rgb
+
+    def _draw_language_traces(self, image_bgr: np.ndarray) -> None:
+        """Draw language traces (CoT, meta_action, answer) on HUD.
+
+        Args:
+            image_bgr: Image in BGR format
+        """
+        # Text box parameters (left side of screen)
+        box_x = 20
+        box_y = 200  # Below existing HUD
+        box_width = 600
+        box_height = 400
+
+        # Create semi-transparent background
+        overlay = image_bgr.copy()
+        cv2.rectangle(overlay, (box_x, box_y),
+                     (box_x + box_width, box_y + box_height),
+                     (0, 0, 0), -1)
+        cv2.addWeighted(overlay, 0.6, image_bgr, 0.4, 0, image_bgr)
+
+        # Draw border
+        cv2.rectangle(image_bgr, (box_x, box_y),
+                     (box_x + box_width, box_y + box_height),
+                     (100, 200, 255), 2)
+
+        # Font settings
+        font = cv2.FONT_HERSHEY_SIMPLEX
+        font_scale = 0.5
+        font_thickness = 1
+        line_height = 20
+
+        # Helper function to wrap text
+        def wrap_text(text: str, max_width: int = 70) -> list[str]:
+            """Wrap text to fit within max_width characters."""
+            words = text.split()
+            lines = []
+            current_line = ""
+            for word in words:
+                test_line = current_line + " " + word if current_line else word
+                if len(test_line) <= max_width:
+                    current_line = test_line
+                else:
+                    if current_line:
+                        lines.append(current_line)
+                    current_line = word
+            if current_line:
+                lines.append(current_line)
+            return lines
+
+        # Display CoT
+        y_offset = box_y + 25
+        cv2.putText(image_bgr, "Chain-of-Thought:", (box_x + 10, y_offset),
+                   font, font_scale, (0, 255, 255), font_thickness)
+        y_offset += line_height
+
+        if self.latest_cot:
+            cot_lines = wrap_text(self.latest_cot, max_width=70)
+            for i, line in enumerate(cot_lines[:8]):  # Max 8 lines for CoT
+                cv2.putText(image_bgr, line, (box_x + 15, y_offset),
+                           font, font_scale, (255, 255, 255), font_thickness)
+                y_offset += line_height
+            if len(cot_lines) > 8:
+                cv2.putText(image_bgr, "...", (box_x + 15, y_offset),
+                           font, font_scale, (150, 150, 150), font_thickness)
+                y_offset += line_height
+        else:
+            cv2.putText(image_bgr, "(No CoT available)", (box_x + 15, y_offset),
+                       font, font_scale, (150, 150, 150), font_thickness)
+            y_offset += line_height
+
+        # Add spacing
+        y_offset += 10
+
+        # Display Meta Action
+        cv2.putText(image_bgr, "Meta Action:", (box_x + 10, y_offset),
+                   font, font_scale, (0, 255, 255), font_thickness)
+        y_offset += line_height
+
+        if self.latest_meta_action:
+            meta_lines = wrap_text(self.latest_meta_action, max_width=70)
+            for line in meta_lines[:3]:  # Max 3 lines for meta action
+                cv2.putText(image_bgr, line, (box_x + 15, y_offset),
+                           font, font_scale, (255, 255, 255), font_thickness)
+                y_offset += line_height
+        else:
+            cv2.putText(image_bgr, "(None)", (box_x + 15, y_offset),
+                       font, font_scale, (150, 150, 150), font_thickness)
+            y_offset += line_height
+
+        # Add spacing
+        y_offset += 10
+
+        # Display Answer
+        cv2.putText(image_bgr, "Answer:", (box_x + 10, y_offset),
+                   font, font_scale, (0, 255, 255), font_thickness)
+        y_offset += line_height
+
+        if self.latest_answer:
+            answer_lines = wrap_text(self.latest_answer, max_width=70)
+            for line in answer_lines[:3]:  # Max 3 lines for answer
+                cv2.putText(image_bgr, line, (box_x + 15, y_offset),
+                           font, font_scale, (255, 255, 255), font_thickness)
+                y_offset += line_height
+        else:
+            cv2.putText(image_bgr, "(None)", (box_x + 15, y_offset),
+                       font, font_scale, (150, 150, 150), font_thickness)
 
     def _add_hud_overlay(self, image_bgr: np.ndarray) -> np.ndarray:
         """Add HUD overlay with vehicle information.
@@ -616,7 +748,7 @@ class AlpamayoController:
 
         # Apply control EVERY frame (using latest prediction from model)
         # This allows smooth control at simulation rate (20Hz) while inference runs at 10Hz
-        self._apply_control()
+        self._apply_decoupled_control()
 
         # Save visualization video
         if self.save_video and self.video_writer is not None:
@@ -765,6 +897,18 @@ class AlpamayoController:
             # Get sampled action from extra (already a Tensor on CPU)
             sampled_action = extra["sampled_action"]  # (1, 1, 1, 64, 2) Tensor
             sampled_action_tensor = sampled_action[0, 0, 0].float().to("cuda")  # (64, 2)
+
+            # Extract language traces (CoT, meta_action, answer)
+            # Shape: [B, num_traj_sets, num_traj_samples] = [1, 1, 1]
+            self.latest_cot = extra["cot"][0, 0, 0] if "cot" in extra else ""
+            self.latest_meta_action = extra["meta_action"][0, 0, 0] if "meta_action" in extra else ""
+            self.latest_answer = extra["answer"][0, 0, 0] if "answer" in extra else ""
+
+            # Debug log (every 10 steps)
+            if self.step_count % 10 == 0:
+                print(f"\n[CoT] {self.latest_cot[:100]}...")  # First 100 chars
+                if self.latest_meta_action:
+                    print(f"[Meta Action] {self.latest_meta_action}")
 
             # Scale curvature to compensate for small curvature_std (0.026)
             # Increased from 5x to 10x for sharper turns
@@ -1305,6 +1449,84 @@ class AlpamayoController:
               f"WP[{best_idx:2d}]: ({target_x:5.2f}, {target_y:5.2f}) | "
               f"Lookahead: {lookahead_distance:.1f}m | "
               f"Speed: {current_speed:4.1f}/{target_speed:4.1f} m/s | "
+              f"Steer: {steering_deg:+5.1f}° ({control.steer:+.3f}) | "
+              f"Throttle: {control.throttle:.3f}")
+
+        self.ego_vehicle.apply_control(control)
+
+    def _apply_decoupled_control(self) -> None:
+        """Apply decoupled lateral and longitudinal control.
+
+        Uses DecoupledController class for:
+        - Lateral control: Fixed lookahead distance on spline-interpolated trajectory
+        - Longitudinal control: Speed control based on curvature and trajectory length
+        """
+        if self.predicted_trajectory is None or len(self.predicted_trajectory) == 0:
+            # Fallback: maintain current speed
+            self._apply_simple_control()
+            return
+
+        if self.decoupled_controller is None:
+            print("[Warning] DecoupledController not initialized, using simple control")
+            self._apply_simple_control()
+            return
+
+        # --- Step 1: Compute target speed (Longitudinal) ---
+        # Get speed limit from CARLA
+        target_speed = self._get_carla_speed_limit()
+
+        # Apply speed reduction based on trajectory length
+        speed_reduction_factor = self._get_speed_reduction_factor()
+        target_speed *= speed_reduction_factor
+
+        # Apply curvature-based speed limit (for safe cornering)
+        curvature_speed_limit = self._calculate_curvature_speed_limit(max_lateral_accel=4.0)
+        target_speed = min(target_speed, curvature_speed_limit)
+
+        # Get current speed
+        current_velocity = self.ego_vehicle.get_velocity()
+        current_speed = np.sqrt(
+            current_velocity.x**2 + current_velocity.y**2 + current_velocity.z**2
+        )
+
+        # --- Step 2: Compute control commands using DecoupledController ---
+        control_output = self.decoupled_controller.compute_control(
+            trajectory=self.predicted_trajectory,
+            target_speed=target_speed,
+            current_speed=current_speed,
+        )
+
+        # Extract control values
+        steering = control_output["steering"]
+        throttle = control_output["throttle"]
+        brake = control_output["brake"]
+        steering_angle_rad = control_output["steering_angle_rad"]
+        target_point = control_output["target_point"]
+        target_idx = control_output["target_idx"]
+        lookahead_distance = control_output["lookahead_distance"]
+
+        # --- Step 3: Apply Control ---
+        control = carla.VehicleControl()
+        control.hand_brake = False
+        control.throttle = float(throttle)
+        control.steer = float(steering)
+        control.brake = float(brake)
+
+        # Check current gear and set to forward if needed
+        current_control = self.ego_vehicle.get_control()
+        if current_control.gear == 0:
+            control.manual_gear_shift = True
+            control.gear = 1
+        else:
+            control.manual_gear_shift = False
+
+        # --- Step 4: Debug Output ---
+        steering_deg = np.rad2deg(steering_angle_rad)
+        target_x, target_y = target_point[0], target_point[1]
+        print(f"[Decoupled Control] Step: {self.step_count:4d} | "
+              f"Lateral: WP[{target_idx:3d}] ({target_x:5.2f}, {target_y:5.2f}), "
+              f"Lookahead: {lookahead_distance:.1f}m | "
+              f"Longitudinal: Speed {current_speed:4.1f}/{target_speed:4.1f} m/s | "
               f"Steer: {steering_deg:+5.1f}° ({control.steer:+.3f}) | "
               f"Throttle: {control.throttle:.3f}")
 
