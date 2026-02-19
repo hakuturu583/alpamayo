@@ -35,8 +35,6 @@ class ControlParams:
     """Vehicle control and trajectory-following parameters."""
 
     max_speed: float = 15.0              # hard speed cap [m/s]
-    max_steering: float = 1.222          # fallback max steering angle [rad]
-    wheelbase: float = 3.005             # fallback wheelbase [m]
     lateral_lookahead: float = 15.0      # fixed lateral lookahead distance [m]
     min_lookahead_distance: float = 4.5  # minimum lookahead distance [m]
     spline_num_points: int = 200         # spline interpolation resolution
