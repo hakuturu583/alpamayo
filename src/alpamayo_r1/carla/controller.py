@@ -100,6 +100,10 @@ class AlpamayoController:
         # Decoupled controller (initialized after vehicle physics are loaded)
         self.decoupled_controller = None
 
+        # Steering / target-speed EMA state
+        self._prev_steering = 0.0
+        self._prev_target_speed: float | None = None
+
         # Pre-allocated tensors for padding (VRAM optimization)
         self._cached_padding_tensors = {
             'xyz': {},  # Cache by pad_length
@@ -1504,6 +1508,13 @@ class AlpamayoController:
         )
         target_speed = min(target_speed, curvature_speed_limit)
 
+        # EMA smoothing on target speed to prevent sudden deceleration
+        ts_alpha = self._config.control.target_speed_alpha
+        if self._prev_target_speed is None:
+            self._prev_target_speed = target_speed
+        target_speed = ts_alpha * target_speed + (1.0 - ts_alpha) * self._prev_target_speed
+        self._prev_target_speed = target_speed
+
         # Get current speed
         current_velocity = self.ego_vehicle.get_velocity()
         current_speed = np.sqrt(
@@ -1518,13 +1529,18 @@ class AlpamayoController:
         )
 
         # Extract control values
-        steering = control_output["steering"]
+        raw_steering = control_output["steering"]
         throttle = control_output["throttle"]
         brake = control_output["brake"]
         steering_angle_rad = control_output["steering_angle_rad"]
         target_point = control_output["target_point"]
         target_idx = control_output["target_idx"]
         lookahead_distance = control_output["lookahead_distance"]
+
+        # EMA smoothing on steering to prevent abrupt changes
+        alpha = self._config.control.steering_alpha
+        steering = alpha * raw_steering + (1.0 - alpha) * self._prev_steering
+        self._prev_steering = steering
 
         # --- Step 3: Apply Control ---
         control = carla.VehicleControl()
@@ -1542,13 +1558,13 @@ class AlpamayoController:
             control.manual_gear_shift = False
 
         # --- Step 4: Debug Output ---
-        steering_deg = np.rad2deg(steering_angle_rad)
+        raw_steer_deg = np.rad2deg(steering_angle_rad)
         target_x, target_y = target_point[0], target_point[1]
         print(f"[Decoupled Control] Step: {self.step_count:4d} | "
               f"Lateral: WP[{target_idx:3d}] ({target_x:5.2f}, {target_y:5.2f}), "
               f"Lookahead: {lookahead_distance:.1f}m | "
               f"Longitudinal: Speed {current_speed:4.1f}/{target_speed:4.1f} m/s | "
-              f"Steer: {steering_deg:+5.1f}° ({control.steer:+.3f}) | "
+              f"Steer: raw={raw_steer_deg:+5.1f}° filtered={control.steer:+.3f} | "
               f"Throttle: {control.throttle:.3f}")
 
         self.ego_vehicle.apply_control(control)

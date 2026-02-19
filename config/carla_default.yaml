@@ -14,17 +14,19 @@ camera:
 
 control:
   max_speed: 15.0               # hard speed cap [m/s]  (~54 km/h)
-  lateral_lookahead: 25.0       # fixed lateral lookahead distance [m]
-  min_lookahead_distance: 7.0   # minimum lookahead distance [m]
+  lateral_lookahead: 55.0       # fixed lateral lookahead distance [m]
+  min_lookahead_distance: 15.0  # minimum lookahead distance [m]
   spline_num_points: 200
   speed_limit_factor: 0.8       # fraction of road speed limit to target
-  max_lateral_accel: 3.5        # max lateral accel for curve speed limit [m/s²]
+  max_lateral_accel: 5.0        # max lateral accel for curve speed limit [m/s²]
   throttle_gain: 0.5            # P-gain: speed error → throttle
   brake_threshold: -0.5         # speed error [m/s] to engage braking
   brake_value: 0.3              # normalised brake command
   speed_reduction_threshold: 0.5   # trajectory-length ratio to start slowing
   min_speed_factor: 0.3         # lower bound on speed reduction multiplier
   rear_axle_offset: 0.5         # rear bumper → rear axle estimate [m]
+  steering_alpha: 0.2           # EMA smoothing: 0=max smooth, 1=no smooth
+  target_speed_alpha: 0.4       # EMA smoothing for target speed: 0=max smooth, 1=no smooth
 
 inference:
   top_p: 0.98
