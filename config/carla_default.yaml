@@ -18,12 +18,12 @@ control:
   min_lookahead_distance: 7.0   # minimum lookahead distance [m]
   spline_num_points: 200
   speed_limit_factor: 0.8       # fraction of road speed limit to target
-  max_lateral_accel: 2.5        # max lateral accel for curve speed limit [m/s²]
+  max_lateral_accel: 3.5        # max lateral accel for curve speed limit [m/s²]
   throttle_gain: 0.5            # P-gain: speed error → throttle
   brake_threshold: -0.5         # speed error [m/s] to engage braking
   brake_value: 0.3              # normalised brake command
-  speed_reduction_threshold: 0.75  # trajectory-length ratio to start slowing
-  min_speed_factor: 0.1         # lower bound on speed reduction multiplier
+  speed_reduction_threshold: 0.5   # trajectory-length ratio to start slowing
+  min_speed_factor: 0.3         # lower bound on speed reduction multiplier
   rear_axle_offset: 0.5         # rear bumper → rear axle estimate [m]
 
 inference:
