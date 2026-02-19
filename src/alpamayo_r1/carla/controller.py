@@ -220,15 +220,16 @@ class AlpamayoController:
         print(f"  Full length:         {bbox.extent.x * 2:.3f}m")
         print(f"  Full width:          {bbox.extent.y * 2:.3f}m")
         print(f"  Full height:         {bbox.extent.z * 2:.3f}m")
-        print(f"\n  Note: CARLA vehicle origin is at actor transform position.")
-        print(f"  Note: BBox center offset shows where geometric center is relative to origin.")
-        print(f"  Note: If BBox offset.x > 0, origin is behind geometric center (typical).")
-        print(f"  Note: Unicycle model typically assumes origin at REAR AXLE center.")
-        if bbox.location.x > 0.1:
-            rear_axle_to_origin = bbox.location.x - bbox.extent.x
-            print(f"\n  ⚠ Vehicle origin appears to be {bbox.location.x:.3f}m forward of rear bumper.")
-            print(f"  ⚠ Rear axle is approximately at x={rear_axle_to_origin:.3f}m from vehicle origin.")
-            print(f"  ⚠ This may cause trajectory offset issues if model expects rear axle origin!")
+
+        # Rear axle x position in actor-local frame (CARLA X=forward)
+        # = rear bumper x + rear_axle_offset
+        self._rear_axle_x_local = (
+            bbox.location.x - bbox.extent.x + self._config.control.rear_axle_offset
+        )
+        print(f"\n[Rear Axle (actor-local frame)]")
+        print(f"  Rear bumper x:       {bbox.location.x - bbox.extent.x:.3f} m")
+        print(f"  Rear axle x:         {self._rear_axle_x_local:.3f} m  "
+              f"(+{self._config.control.rear_axle_offset:.2f}m from bumper)")
 
         print("\n" + "="*80)
         print("CARLA VEHICLE CONTROL INPUT RANGES")
@@ -973,30 +974,9 @@ class AlpamayoController:
             )
 
             # Extract corrected trajectory
+            # Trajectory is already in rear-axle local frame because ego_history_xyz
+            # was constructed with rear axle as origin in _prepare_model_input().
             self.predicted_trajectory = pred_xyz_corrected.cpu().numpy()[0]  # (num_timesteps, 3)
-
-            # Apply coordinate offset correction
-            # Unicycle model expects origin at rear axle, but CARLA uses vehicle center
-            # Calculate rear axle position and shift trajectory accordingly
-            bbox = self.ego_vehicle.bounding_box
-            # Rear axle is approximately at rear bumper + rear_axle_offset
-            rear_axle_x = bbox.location.x - bbox.extent.x + self._config.control.rear_axle_offset
-
-            # Calculate offset: how far trajectory start is from rear axle
-            traj_start_x = self.predicted_trajectory[0, 0]
-            offset_correction = traj_start_x - rear_axle_x
-
-            # Apply correction: shift entire trajectory backward to align with rear axle
-            if abs(offset_correction) > 0.1:  # Only correct if offset > 10cm
-                self.predicted_trajectory[:, 0] -= offset_correction
-
-                # Log correction (only first time and every 50 steps)
-                if self.step_count == 1 or self.step_count % 50 == 0:
-                    print(f"[Trajectory Correction] Applied offset: -{offset_correction:.3f}m "
-                          f"(rear axle: {rear_axle_x:.3f}m, traj start: {traj_start_x:.3f}m)")
-
-            # Analyze trajectory offset (debug - after correction)
-            self._analyze_trajectory_offset()
 
             # Delete intermediate tensors to free memory immediately
             del pred_xyz, pred_rot, extra, model_input, sampled_action_tensor
@@ -1111,12 +1091,17 @@ class AlpamayoController:
             history_xyz = np.array(self.ego_history_xyz[-num_history:])
             history_rot = np.array(self.ego_history_rot[-num_history:])
 
-            # Transform to local frame (relative to current pose)
-            current_xyz = history_xyz[-1]
+            # Transform to local frame with rear axle as origin
+            # (Unicycle model expects rear axle as coordinate origin)
             current_rot = spt.Rotation.from_matrix(history_rot[-1])
             current_rot_inv = current_rot.inv()
 
-            history_xyz_local = current_rot_inv.apply(history_xyz - current_xyz)
+            # Rear axle world position at the current timestep
+            rear_axle_world = history_xyz[-1] + current_rot.apply(
+                np.array([self._rear_axle_x_local, 0.0, 0.0])
+            )
+
+            history_xyz_local = current_rot_inv.apply(history_xyz - rear_axle_world)
 
             # Convert CARLA coordinate system (X=forward, Y=right) to
             # model's expected coordinate system (X=forward, Y=left)
