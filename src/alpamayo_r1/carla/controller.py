@@ -1127,6 +1127,14 @@ class AlpamayoController:
                 current_rot_inv * spt.Rotation.from_matrix(history_rot)
             ).as_matrix()
 
+            # Convert rotation matrices from CARLA (Y=right) to PhysicalAI-AV (Y=left) convention.
+            # Positions were already converted above (history_xyz_local[:, 1] *= -1).
+            # For rotation matrices, the equivalent change of basis is:
+            #   R_physicalai = T @ R_carla @ T,  where T = diag(1, -1, 1)
+            # which negates the Y row then the Y column (double-negation leaves [1,1] unchanged).
+            history_rot_local[:, 1, :] *= -1  # negate Y row
+            history_rot_local[:, :, 1] *= -1  # negate Y column
+
             # Debug: Log ego history to analyze trajectory curvature (minimal version to save memory)
             if self.step_count % 50 == 0:  # Reduced frequency: every 50 steps
                 print(f"\n[DEBUG Ego History] Step: {self.step_count}, Length: {num_history}")
