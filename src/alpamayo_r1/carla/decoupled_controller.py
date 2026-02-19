@@ -175,8 +175,9 @@ class DecoupledController:
 
         if lookahead_distance > 0.1:
             # Curvature = 2 * lateral_error / lookahead_distance^2
-            # Model coords: Y=left (positive = target on left)
-            # CARLA control: steer positive = turn left
+            # Model coords: Y=left  → positive target_y means target is to the LEFT
+            # CARLA control: steer positive = turn RIGHT
+            # → negate: left target (positive curvature) needs negative steer
             curvature = 2.0 * target_y / (lookahead_distance**2)
 
             # Convert curvature to steering angle
@@ -188,8 +189,8 @@ class DecoupledController:
                 steering_angle_rad, -self.max_steering, self.max_steering
             )
 
-            # Normalize to CARLA control range [-1.0, 1.0]
-            steering = steering_angle_rad / self.max_steering
+            # Normalize to CARLA control range [-1.0, 1.0] with sign flip
+            steering = -steering_angle_rad / self.max_steering
 
         return steering, steering_angle_rad, target_point, target_idx, actual_lookahead
 

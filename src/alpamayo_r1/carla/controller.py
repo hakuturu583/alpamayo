@@ -1427,9 +1427,9 @@ class AlpamayoController:
             # Clamp to max steering angle (radians)
             steering_angle_rad = np.clip(steering_angle_rad, -self.max_steering, self.max_steering)
 
-            # Normalize to CARLA's control range [-1.0, 1.0]
-            # control.steer is normalized, where 1.0 = max_steer_angle
-            steering = steering_angle_rad / self.max_steering
+            # Normalize to CARLA control range [-1.0, 1.0] with sign flip
+            # CARLA steer+ = right, model Y=left so positive curvature = left → negate
+            steering = -steering_angle_rad / self.max_steering
         else:
             # Too close, go straight
             steering = 0.0
