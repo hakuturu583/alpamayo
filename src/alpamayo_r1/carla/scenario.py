@@ -3,6 +3,7 @@
 from abc import ABC, abstractmethod
 from typing import Any
 
+from .config import CarlaConfig
 from .controller import AlpamayoController
 
 
@@ -27,9 +28,7 @@ class BaseScenario(ABC):
         world: Any,
         client: Any,
         traffic_manager: Any,
-        config: dict | None = None,
-        host: str = "localhost",
-        port: int = 2000,
+        config: CarlaConfig | None = None,
         model: Any = None,
         processor: Any = None,
         use_alpamayo_control: bool = False,
@@ -40,9 +39,7 @@ class BaseScenario(ABC):
             world: CARLA world instance
             client: CARLA client instance
             traffic_manager: CARLA TrafficManager instance
-            config: Optional configuration dictionary for scenario parameters
-            host: CARLA server host address (for reference/logging)
-            port: CARLA server port (for reference/logging)
+            config: Full pipeline configuration (defaults to CarlaConfig())
             model: Optional Alpamayo R1 model for autonomous control
             processor: Optional model processor/tokenizer
             use_alpamayo_control: Whether to use Alpamayo model for ego vehicle control
@@ -51,9 +48,9 @@ class BaseScenario(ABC):
         self.client = client
         self.traffic_manager = traffic_manager
         self.ego_vehicle = None
-        self.config = config or {}
-        self.host = host
-        self.port = port
+        self._config = config or CarlaConfig()
+        self.host = self._config.simulation.host
+        self.port = self._config.simulation.port
 
         # Alpamayo controller (initialized after ego vehicle is spawned)
         self.model = model
@@ -71,7 +68,7 @@ class BaseScenario(ABC):
         self.available_spawn_points = []
 
         # Random seed for spawn point selection
-        self.seed = self.config.get("seed", 0)
+        self.seed = self._config.simulation.seed
         import numpy as np
         np.random.seed(self.seed)
         print(f"Random seed set to {self.seed} for spawn point selection")
@@ -128,7 +125,7 @@ class BaseScenario(ABC):
                 cameras=cameras,
                 model=self.model,
                 processor=self.processor,
-                control_frequency=10.0,
+                config=self._config,
                 save_video=save_video,
                 log_dir=log_dir,
             )
@@ -276,14 +273,14 @@ class BaseScenario(ABC):
         ]
 
         # Limit vehicle NPCs to available spawn points
-        requested_vehicles = self.config.get("num_vehicles", 30)
+        requested_vehicles = self._config.simulation.num_vehicles
         max_vehicles = len(self.available_spawn_points)
         if requested_vehicles > max_vehicles:
             print(
                 f"Warning: Requested {requested_vehicles} vehicles but only "
                 f"{max_vehicles} spawn points available. Limiting to {max_vehicles}."
             )
-            self.config["num_vehicles"] = max_vehicles
+            self._config.simulation.num_vehicles = max_vehicles
 
         return ego_spawn_point
 
@@ -339,14 +336,14 @@ class BaseScenario(ABC):
                 ]
 
                 # Update vehicle NPC limit
-                requested_vehicles = self.config.get("num_vehicles", 30)
+                requested_vehicles = self._config.simulation.num_vehicles
                 max_vehicles = len(self.available_spawn_points)
                 if requested_vehicles > max_vehicles:
                     print(
                         f"Warning: Requested {requested_vehicles} vehicles but only "
                         f"{max_vehicles} spawn points available. Limiting to {max_vehicles}."
                     )
-                    self.config["num_vehicles"] = max_vehicles
+                    self._config.simulation.num_vehicles = max_vehicles
 
                 return self.ego_vehicle
 

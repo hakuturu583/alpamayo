@@ -32,6 +32,9 @@ class DecoupledController:
         lateral_lookahead: float = 15.0,
         min_lookahead_distance: float = 4.5,
         spline_num_points: int = 200,
+        throttle_gain: float = 0.5,
+        brake_threshold: float = -0.5,
+        brake_value: float = 0.3,
     ):
         """Initialize decoupled controller.
 
@@ -41,12 +44,18 @@ class DecoupledController:
             lateral_lookahead: Fixed lookahead distance for lateral control (default: 15.0m)
             min_lookahead_distance: Minimum lookahead distance (default: 4.5m)
             spline_num_points: Number of points for spline interpolation (default: 200)
+            throttle_gain: P-gain for speed error to throttle mapping (default: 0.5)
+            brake_threshold: Speed error [m/s] below which braking is applied (default: -0.5)
+            brake_value: Normalised brake command when braking (default: 0.3)
         """
         self.wheelbase = wheelbase
         self.max_steering = max_steering
         self.lateral_lookahead = lateral_lookahead
         self.min_lookahead_distance = min_lookahead_distance
         self.spline_num_points = spline_num_points
+        self.throttle_gain = throttle_gain
+        self.brake_threshold = brake_threshold
+        self.brake_value = brake_value
 
     def interpolate_trajectory_spline(
         self, trajectory: np.ndarray, num_points: Optional[int] = None
@@ -199,10 +208,10 @@ class DecoupledController:
         speed_error = target_speed - current_speed
 
         # Proportional speed control
-        throttle = np.clip(0.5 * speed_error, 0.0, 1.0)
+        throttle = np.clip(self.throttle_gain * speed_error, 0.0, 1.0)
 
         # Apply brake if significantly over target speed
-        brake = 0.0 if speed_error > -0.5 else 0.3
+        brake = 0.0 if speed_error > self.brake_threshold else self.brake_value
 
         return throttle, brake
 

@@ -4,6 +4,7 @@ import argparse
 
 import carla
 
+from .config import CarlaConfig
 from .inference import CARLASimulation
 from .scenario import BaseScenario
 
@@ -20,23 +21,27 @@ class AutonomousDrivingScenario(BaseScenario):
     def setup(self) -> None:
         """Set up the scenario."""
         # Spawn ego vehicle (will automatically handle spawn point allocation and retries)
-        self.spawn_ego_vehicle(spawn_point=None, vehicle_model="vehicle.tesla.model3")
+        self.spawn_ego_vehicle(
+            spawn_point=None,
+            vehicle_model=self._config.simulation.vehicle_model,
+        )
 
     def spawn_npcs(self) -> None:
         """Spawn NPCs for the scenario."""
-        num_vehicles = self.config.get("num_vehicles", 30)
-        num_pedestrians = self.config.get("num_pedestrians", 20)
+        sim = self._config.simulation
+        num_vehicles = sim.num_vehicles
+        num_pedestrians = sim.num_pedestrians
 
         print(f"Spawning {num_vehicles} vehicles and {num_pedestrians} pedestrians...")
 
         # Use base class methods for spawning
-        self.spawn_vehicle_npcs(num_vehicles)
-        self.spawn_pedestrian_npcs(num_pedestrians, spawn_radius=60.0)
+        self.spawn_vehicle_npcs(num_vehicles, min_distance_from_ego=sim.min_vehicle_distance)
+        self.spawn_pedestrian_npcs(num_pedestrians, spawn_radius=sim.pedestrian_spawn_radius)
 
     def get_spawn_point(self) -> carla.Transform:
         """Get spawn point for ego vehicle."""
         spawn_points = self.world.get_map().get_spawn_points()
-        spawn_idx = self.config.get("spawn_point_index", 0)
+        spawn_idx = self._config.simulation.spawn_point_index
         return spawn_points[spawn_idx] if spawn_points else carla.Transform()
 
     def run(self) -> None:
@@ -53,46 +58,58 @@ def main():
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
     parser.add_argument(
+        "--config",
+        type=str,
+        default=None,
+        help="Path to YAML configuration file (default: use dataclass defaults)",
+    )
+    parser.add_argument(
         "--host",
         type=str,
-        default="localhost",
-        help="CARLA server host address",
+        default=None,
+        help="CARLA server host address (overrides config)",
     )
     parser.add_argument(
         "--port",
         type=int,
-        default=2000,
-        help="CARLA server port",
+        default=None,
+        help="CARLA server port (overrides config)",
     )
     parser.add_argument(
         "--map",
         type=str,
-        default="Town01",
-        help="Map to load",
+        default=None,
+        help="Map to load (overrides config)",
     )
     parser.add_argument(
         "--num-vehicles",
         type=int,
-        default=50,
-        help="Number of vehicle NPCs",
+        default=None,
+        help="Number of vehicle NPCs (overrides config)",
     )
     parser.add_argument(
         "--num-pedestrians",
         type=int,
-        default=30,
-        help="Number of pedestrian NPCs",
+        default=None,
+        help="Number of pedestrian NPCs (overrides config)",
     )
     parser.add_argument(
         "--num-steps",
         type=int,
-        default=2000,
-        help="Number of simulation steps",
+        default=None,
+        help="Number of simulation steps (overrides config)",
     )
     parser.add_argument(
         "--spawn-point",
         type=int,
-        default=0,
-        help="Spawn point index for ego vehicle",
+        default=None,
+        help="Spawn point index for ego vehicle (overrides config)",
+    )
+    parser.add_argument(
+        "--seed",
+        type=int,
+        default=None,
+        help="Random seed for spawn point selection (overrides config)",
     )
     parser.add_argument(
         "--no-model",
@@ -102,24 +119,48 @@ def main():
     parser.add_argument(
         "--no-video",
         action="store_true",
-        help="Disable video recording to test if it causes segfault",
-    )
-    parser.add_argument(
-        "--seed",
-        type=int,
-        default=0,
-        help="Random seed for spawn point selection (default: 0)",
+        help="Disable video recording",
     )
 
     args = parser.parse_args()
 
-    print(f"Connecting to CARLA server at {args.host}:{args.port}")
+    # Load configuration from YAML if specified, otherwise use dataclass defaults
+    if args.config:
+        cfg = CarlaConfig.from_yaml(args.config)
+        print(f"Loaded config from: {args.config}")
+    else:
+        cfg = CarlaConfig()
+        print("Using default configuration (no --config specified)")
+
+    # Apply CLI overrides on top of YAML config
+    if args.host is not None:
+        cfg.simulation.host = args.host
+    if args.port is not None:
+        cfg.simulation.port = args.port
+    if args.map is not None:
+        cfg.simulation.map_name = args.map
+    if args.num_vehicles is not None:
+        cfg.simulation.num_vehicles = args.num_vehicles
+    if args.num_pedestrians is not None:
+        cfg.simulation.num_pedestrians = args.num_pedestrians
+    if args.num_steps is not None:
+        cfg.simulation.num_steps = args.num_steps
+    if args.spawn_point is not None:
+        cfg.simulation.spawn_point_index = args.spawn_point
+    if args.seed is not None:
+        cfg.simulation.seed = args.seed
+    if args.no_video:
+        cfg.video.save_video = False
+
+    sim_cfg = cfg.simulation
+    print(f"Connecting to CARLA server at {sim_cfg.host}:{sim_cfg.port}")
     print(f"Configuration:")
-    print(f"  Map: {args.map}")
-    print(f"  Vehicle NPCs: {args.num_vehicles}")
-    print(f"  Pedestrian NPCs: {args.num_pedestrians}")
-    print(f"  Simulation steps: {args.num_steps}")
-    print(f"  Random seed: {args.seed}")
+    print(f"  Map: {sim_cfg.map_name}")
+    print(f"  Vehicle NPCs: {sim_cfg.num_vehicles}")
+    print(f"  Pedestrian NPCs: {sim_cfg.num_pedestrians}")
+    print(f"  Simulation steps: {sim_cfg.num_steps}")
+    print(f"  Random seed: {sim_cfg.seed}")
+    print(f"  Save video: {cfg.video.save_video}")
 
     # Load model unless --no-model is specified
     model = None
@@ -188,33 +229,20 @@ def main():
         print("Model loading disabled (--no-model) - using rule-based controller")
 
     # Create simulation
-    with CARLASimulation(host=args.host, port=args.port, map_name=args.map) as sim:
-        # Create scenario with Alpamayo control enabled
-        scenario_config = {
-            "num_vehicles": args.num_vehicles,
-            "num_pedestrians": args.num_pedestrians,
-            "spawn_point_index": args.spawn_point,
-            "seed": args.seed,
-        }
-
+    with CARLASimulation(config=cfg) as sim:
         scenario = AutonomousDrivingScenario(
             world=sim.world,
             client=sim.client,
             traffic_manager=sim.traffic_manager,
-            config=scenario_config,
-            host=args.host,
-            port=args.port,
+            config=cfg,
             model=model,
             processor=processor,
             use_alpamayo_control=True,  # Enable Alpamayo controller
         )
 
-        # Store save_video setting for controller initialization
-        scenario.save_video = not args.no_video
-
         # Run scenario
-        print(f"Running autonomous driving scenario for {args.num_steps} steps...")
-        sim.run_scenario(scenario, num_steps=args.num_steps)
+        print(f"Running autonomous driving scenario for {sim_cfg.num_steps} steps...")
+        sim.run_scenario(scenario, num_steps=sim_cfg.num_steps)
 
         print("Simulation complete!")
 

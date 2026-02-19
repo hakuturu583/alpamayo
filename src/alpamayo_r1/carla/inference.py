@@ -13,6 +13,7 @@ import carla
 import numpy as np
 from tqdm import tqdm
 
+from .config import CarlaConfig, CameraParams
 from .scenario import BaseScenario
 
 
@@ -24,53 +25,60 @@ class CameraConfig:
     - X-axis: points forward
     - Y-axis: points left (when looking forward)
     - Z-axis: points up
+
+    Build from a CameraParams dataclass so that positions and FOVs are
+    configurable without touching this file.
     """
 
-    # Camera configurations: (name, fov, transform)
-    # Transform: (x, y, z, pitch, yaw, roll) in meters and degrees
-    # Only cameras used in test_inference.py (matching load_physical_aiavdataset.py defaults)
-    CAMERAS = [
-        {
-            "name": "camera_cross_left_120fov",
-            "index": 0,
-            "fov": 120.0,
-            "transform": carla.Transform(
-                carla.Location(x=0.0, y=-1.2, z=1.5),
-                carla.Rotation(pitch=0.0, yaw=-90.0, roll=0.0),
-            ),
-        },
-        {
-            "name": "camera_front_wide_120fov",
-            "index": 1,
-            "fov": 120.0,
-            "transform": carla.Transform(
-                carla.Location(x=2.0, y=0.0, z=1.5),
-                carla.Rotation(pitch=0.0, yaw=0.0, roll=0.0),
-            ),
-        },
-        {
-            "name": "camera_cross_right_120fov",
-            "index": 2,
-            "fov": 120.0,
-            "transform": carla.Transform(
-                carla.Location(x=0.0, y=1.2, z=1.5),
-                carla.Rotation(pitch=0.0, yaw=90.0, roll=0.0),
-            ),
-        },
-        {
-            "name": "camera_front_tele_30fov",
-            "index": 6,
-            "fov": 30.0,
-            "transform": carla.Transform(
-                carla.Location(x=2.0, y=0.0, z=1.5),
-                carla.Rotation(pitch=0.0, yaw=0.0, roll=0.0),
-            ),
-        },
-    ]
+    def __init__(self, params: CameraParams | None = None) -> None:
+        if params is None:
+            params = CameraParams()
 
-    # Resolution matching PhysicalAI-AV (1080p)
-    WIDTH = 1920
-    HEIGHT = 1080
+        self.WIDTH = params.width
+        self.HEIGHT = params.height
+
+        z = params.height_offset
+        lx = params.front_longitudinal_offset
+        ly = params.cross_lateral_offset
+
+        self.CAMERAS = [
+            {
+                "name": "camera_cross_left_120fov",
+                "index": 0,
+                "fov": params.cross_fov,
+                "transform": carla.Transform(
+                    carla.Location(x=0.0, y=-ly, z=z),
+                    carla.Rotation(pitch=0.0, yaw=-90.0, roll=0.0),
+                ),
+            },
+            {
+                "name": "camera_front_wide_120fov",
+                "index": 1,
+                "fov": params.front_wide_fov,
+                "transform": carla.Transform(
+                    carla.Location(x=lx, y=0.0, z=z),
+                    carla.Rotation(pitch=0.0, yaw=0.0, roll=0.0),
+                ),
+            },
+            {
+                "name": "camera_cross_right_120fov",
+                "index": 2,
+                "fov": params.cross_fov,
+                "transform": carla.Transform(
+                    carla.Location(x=0.0, y=ly, z=z),
+                    carla.Rotation(pitch=0.0, yaw=90.0, roll=0.0),
+                ),
+            },
+            {
+                "name": "camera_front_tele_30fov",
+                "index": 6,
+                "fov": params.front_tele_fov,
+                "transform": carla.Transform(
+                    carla.Location(x=lx, y=0.0, z=z),
+                    carla.Rotation(pitch=0.0, yaw=0.0, roll=0.0),
+                ),
+            },
+        ]
 
 
 class CARLASimulation:
@@ -81,24 +89,19 @@ class CARLASimulation:
     scenarios with vehicle and pedestrian NPCs.
     """
 
-    def __init__(
-        self,
-        host: str = "localhost",
-        port: int = 2000,
-        timeout: float = 10.0,
-        map_name: str | None = None,
-    ):
+    def __init__(self, config: CarlaConfig | None = None) -> None:
         """Initialize CARLA simulation.
 
         Args:
-            host: CARLA server host address
-            port: CARLA server port
-            timeout: Connection timeout in seconds
-            map_name: Optional map name to load (e.g., "Town01")
+            config: Full pipeline configuration.  Defaults to CarlaConfig()
+                    (all dataclass defaults) when not provided.
         """
-        self.host = host
-        self.port = port
-        self.timeout = timeout
+        self._config = config or CarlaConfig()
+        sim = self._config.simulation
+
+        self.host = sim.host
+        self.port = sim.port
+        self.timeout = sim.timeout
 
         # CARLA client and world
         self.client = None
@@ -111,9 +114,12 @@ class CARLASimulation:
         self.camera_queues = {}
 
         # Map
-        self.map_name = map_name
+        self.map_name = sim.map_name
 
-        print(f"Initializing CARLA simulation at {host}:{port}...")
+        # Camera config built from params
+        self._camera_config = CameraConfig(self._config.camera)
+
+        print(f"Initializing CARLA simulation at {self.host}:{self.port}...")
 
     def connect(self) -> None:
         """Connect to CARLA server and initialize world."""
@@ -132,13 +138,14 @@ class CARLASimulation:
         self._cleanup_all_actors()
 
         # Initialize TrafficManager
-        self.traffic_manager = self.client.get_trafficmanager(8000)
+        sim = self._config.simulation
+        self.traffic_manager = self.client.get_trafficmanager(sim.traffic_manager_port)
         self.traffic_manager.set_synchronous_mode(True)
 
         # Set synchronous mode for deterministic simulation
         settings = self.world.get_settings()
         settings.synchronous_mode = True
-        settings.fixed_delta_seconds = 0.05  # 20 FPS for simulation
+        settings.fixed_delta_seconds = sim.delta_seconds
         self.world.apply_settings(settings)
 
         print(f"Connected to CARLA. Map: {self.world.get_map().name}")
@@ -180,11 +187,11 @@ class CARLASimulation:
         camera_bp = blueprint_library.find("sensor.camera.rgb")
 
         # Configure camera resolution
-        camera_bp.set_attribute("image_size_x", str(CameraConfig.WIDTH))
-        camera_bp.set_attribute("image_size_y", str(CameraConfig.HEIGHT))
+        camera_bp.set_attribute("image_size_x", str(self._camera_config.WIDTH))
+        camera_bp.set_attribute("image_size_y", str(self._camera_config.HEIGHT))
 
         # Spawn all cameras
-        for cam_config in CameraConfig.CAMERAS:
+        for cam_config in self._camera_config.CAMERAS:
             # Set FOV for this camera
             camera_bp.set_attribute("fov", str(cam_config["fov"]))
 
@@ -390,7 +397,7 @@ class CARLASimulation:
             # Initialize Alpamayo controller if model-based control is enabled
             if scenario.use_alpamayo_control:
                 print("Initializing Alpamayo controller...")
-                save_video = getattr(scenario, 'save_video', True)  # Default to True if not set
+                save_video = scenario._config.video.save_video
                 scenario.initialize_alpamayo_controller(self.cameras, save_video=save_video)
 
             print("Spawning NPCs...")

@@ -12,6 +12,7 @@ from einops import rearrange
 from PIL import Image
 
 from alpamayo_r1 import helper
+from alpamayo_r1.carla.config import CarlaConfig
 from alpamayo_r1.carla.decoupled_controller import DecoupledController
 
 
@@ -32,7 +33,7 @@ class AlpamayoController:
         cameras: dict[str, carla.Actor],
         model: Any = None,
         processor: Any = None,
-        control_frequency: float = 10.0,
+        config: CarlaConfig | None = None,
         save_video: bool = True,
         log_dir: str = None,
     ):
@@ -43,15 +44,16 @@ class AlpamayoController:
             cameras: Dictionary mapping camera names to camera actors
             model: Alpamayo R1 model instance (optional)
             processor: Model processor/tokenizer instance (optional)
-            control_frequency: Control update frequency in Hz (default: 10Hz)
+            config: Full pipeline configuration (defaults to CarlaConfig())
             save_video: Whether to save visualization video (default: True)
             log_dir: Directory to save video logs (default: log/YYYYMMDD_HHMMSS)
         """
+        self._config = config or CarlaConfig()
         self.ego_vehicle = ego_vehicle
         self.cameras = cameras
         self.model = model
         self.processor = processor
-        self.control_frequency = control_frequency
+        self.control_frequency = self._config.inference.control_frequency
         self.save_video = save_video
 
         # Create log directory with timestamp
@@ -66,14 +68,13 @@ class AlpamayoController:
             os.makedirs(self.log_dir, exist_ok=True)
             print(f"Video logs will be saved to: {self.log_dir}")
 
-        # Control parameters
-        self.max_speed = 15.0  # m/s (about 54 km/h)
-        self.max_steering = 1.222  # radians (initial/fallback) - will be updated from CARLA physics
-
-        # Pure pursuit parameters
-        self.wheelbase = 3.005  # meters (initial/fallback) - will be updated from CARLA physics
-        self.lookahead_time = 2.0  # seconds (reduced from 2.5s for more responsive steering)
-        self.min_lookahead_distance = 4.5  # meters (reduced from 6.0m for sharper turns)
+        # Control parameters (initial/fallback values - may be updated from CARLA physics)
+        ctrl = self._config.control
+        self.max_speed = ctrl.max_speed
+        self.max_steering = ctrl.max_steering
+        self.wheelbase = ctrl.wheelbase
+        self.lookahead_time = 2.0  # seconds (legacy pure pursuit parameter)
+        self.min_lookahead_distance = ctrl.min_lookahead_distance
 
         # State tracking
         self.ego_history_xyz = []
@@ -88,7 +89,7 @@ class AlpamayoController:
 
         # Rolling camera frame buffer: stores last NUM_FRAME_HISTORY frames per camera
         # Matches training data: [t0-0.3s, t0-0.2s, t0-0.1s, t0] at 10Hz
-        self.NUM_FRAME_HISTORY = 4
+        self.NUM_FRAME_HISTORY = self._config.inference.num_frame_history
         self.camera_frame_buffer: dict[str, deque] = {}
 
         # Language traces (CoT, meta action, answer)
@@ -109,7 +110,7 @@ class AlpamayoController:
         self.video_writer = None
         self.video_frame_count = 0
         self.video_segment_index = 0
-        self.frames_per_segment = 100
+        self.frames_per_segment = self._config.video.frames_per_segment
         if self.save_video:
             self._init_video_writer()
 
@@ -249,13 +250,17 @@ class AlpamayoController:
         print(f"  Actual angle = control.steer * max_steer_angle")
         print("="*80 + "\n")
 
-        # Initialize decoupled controller with vehicle parameters
+        # Initialize decoupled controller with vehicle parameters from config
+        ctrl = self._config.control
         self.decoupled_controller = DecoupledController(
             wheelbase=self.wheelbase,
             max_steering=self.max_steering,
-            lateral_lookahead=15.0,  # Fixed lookahead distance for lateral control
-            min_lookahead_distance=4.5,
-            spline_num_points=200,
+            lateral_lookahead=ctrl.lateral_lookahead,
+            min_lookahead_distance=ctrl.min_lookahead_distance,
+            spline_num_points=ctrl.spline_num_points,
+            throttle_gain=ctrl.throttle_gain,
+            brake_threshold=ctrl.brake_threshold,
+            brake_value=ctrl.brake_value,
         )
         print(f"[Decoupled Controller] Initialized with:")
         print(f"  Lateral lookahead:   {self.decoupled_controller.lateral_lookahead:.1f} m (fixed)")
@@ -275,13 +280,13 @@ class AlpamayoController:
         video_filename = f"trajectory_{self.video_segment_index:03d}.mp4"
         video_path = f"{self.log_dir}/{video_filename}"
 
-        # Video parameters (1920x1080 at 20 FPS to match CARLA simulation)
+        # Video parameters (resolution and FPS from config)
         fourcc = cv2.VideoWriter_fourcc(*'mp4v')
         self.video_writer = cv2.VideoWriter(
             video_path,
             fourcc,
-            20.0,  # FPS (CARLA default)
-            (1920, 1080)  # Resolution
+            self._config.video.fps,
+            (self._config.camera.width, self._config.camera.height),
         )
         print(f"Initialized video writer: {video_path}")
         self.video_frame_count = 0
@@ -294,10 +299,11 @@ class AlpamayoController:
             print("Warning: camera_front_wide_120fov not found")
             return
 
-        # Camera intrinsics (1920x1080, 120° FOV)
-        self.image_width = 1920
-        self.image_height = 1080
-        self.fov = 120.0  # degrees
+        # Camera intrinsics from config
+        cam = self._config.camera
+        self.image_width = cam.width
+        self.image_height = cam.height
+        self.fov = cam.front_wide_fov
 
         # Calculate focal length from FOV
         # f = (image_width / 2) / tan(fov / 2)
@@ -314,10 +320,11 @@ class AlpamayoController:
         ])
 
         # Camera extrinsics (relative to ego vehicle)
-        # Use the known camera configuration from CameraConfig
-        # Front wide camera is mounted at x=2.0m (forward), y=0.0m (left), z=1.5m (up)
+        # Front wide camera is mounted at (front_longitudinal_offset, 0, height_offset)
         # with rotation pitch=0, yaw=0, roll=0 (aligned with vehicle)
-        self.camera_offset = np.array([2.0, 0.0, 1.5])
+        self.camera_offset = np.array([
+            cam.front_longitudinal_offset, 0.0, cam.height_offset
+        ])
 
         # Camera rotation relative to ego vehicle (identity for front camera)
         self.camera_rotation = spt.Rotation.from_euler('zyx', [0, 0, 0])
@@ -741,9 +748,11 @@ class AlpamayoController:
         self.step_count += 1
         self.world_snapshot = world_snapshot
 
-        # Run model inference at control frequency (10Hz)
-        # Update ego state and run inference at the same frequency
-        if self.step_count - self.last_control_step >= (1.0 / self.control_frequency) * 20:
+        # Run model inference at control frequency
+        # steps_per_control = sim_hz / control_hz = (1/delta_seconds) / control_frequency
+        sim_hz = 1.0 / self._config.simulation.delta_seconds
+        steps_per_control = round(sim_hz / self.control_frequency)
+        if self.step_count - self.last_control_step >= steps_per_control:
             # Update ego state at 10Hz (same as model training frequency)
             self._update_ego_state()
 
@@ -859,8 +868,7 @@ class AlpamayoController:
 
             # 2. Estimated rear axle position (Unicycle model origin)
             bbox = self.ego_vehicle.bounding_box
-            # Rear axle is approximately at rear bumper + small offset
-            rear_axle_x = bbox.location.x - bbox.extent.x + 0.5  # ~0.5m from rear bumper
+            rear_axle_x = bbox.location.x - bbox.extent.x + self._config.control.rear_axle_offset
             rear_axle_pos = np.array([rear_axle_x, 0.0, 0.0])
 
             # 3. Trajectory start point
@@ -909,13 +917,14 @@ class AlpamayoController:
 
             # Run inference with inference_mode (more efficient than no_grad) and autocast
             # inference_mode disables view tracking and version counter, reducing memory overhead
+            inf = self._config.inference
             with torch.inference_mode(), torch.autocast("cuda", dtype=torch.bfloat16):
                 pred_xyz, pred_rot, extra = self.model.sample_trajectories_from_data_with_vlm_rollout(
                     data=model_input,
-                    top_p=0.98,
-                    temperature=0.6,
-                    num_traj_samples=1,
-                    max_generation_length=256,  # Same as test_inference.py
+                    top_p=inf.top_p,
+                    temperature=inf.temperature,
+                    num_traj_samples=inf.num_traj_samples,
+                    max_generation_length=inf.max_generation_length,
                     return_extra=True,
                 )
 
@@ -980,8 +989,8 @@ class AlpamayoController:
             # Unicycle model expects origin at rear axle, but CARLA uses vehicle center
             # Calculate rear axle position and shift trajectory accordingly
             bbox = self.ego_vehicle.bounding_box
-            # Rear axle is approximately at rear bumper + small offset
-            rear_axle_x = bbox.location.x - bbox.extent.x + 0.5  # ~0.5m from rear bumper
+            # Rear axle is approximately at rear bumper + rear_axle_offset
+            rear_axle_x = bbox.location.x - bbox.extent.x + self._config.control.rear_axle_offset
 
             # Calculate offset: how far trajectory start is from rear axle
             traj_start_x = self.predicted_trajectory[0, 0]
@@ -1259,10 +1268,11 @@ class AlpamayoController:
         length_ratio = actual_length / expected_length
 
         # Apply speed reduction if trajectory is significantly shorter
-        reduction_threshold = 0.75  # Start reducing below 75% of expected
+        ctrl = self._config.control
+        reduction_threshold = ctrl.speed_reduction_threshold
         if length_ratio < reduction_threshold:
             # Linear reduction from threshold to minimum
-            speed_factor = max(0.1, length_ratio / reduction_threshold)
+            speed_factor = max(ctrl.min_speed_factor, length_ratio / reduction_threshold)
 
             if self.step_count % 20 == 0:
                 print(f"[Speed Reduction] Trajectory length: {actual_length:.1f}m / {expected_length:.1f}m "
@@ -1342,8 +1352,8 @@ class AlpamayoController:
         speed_limit_kmh = self.ego_vehicle.get_speed_limit()
         speed_limit_ms = speed_limit_kmh / 3.6
 
-        # Apply 80% factor to OpenDRIVE speed limit for safer driving
-        speed_limit_ms *= 0.8
+        # Apply speed_limit_factor to OpenDRIVE speed limit for safer driving
+        speed_limit_ms *= self._config.control.speed_limit_factor
 
         speed_limit_ms = min(speed_limit_ms, self.max_speed)
 
@@ -1367,7 +1377,9 @@ class AlpamayoController:
         target_speed *= speed_reduction_factor
 
         # Apply curvature-based speed limit (for safe cornering)
-        curvature_speed_limit = self._calculate_curvature_speed_limit(max_lateral_accel=4.0)
+        curvature_speed_limit = self._calculate_curvature_speed_limit(
+            max_lateral_accel=self._config.control.max_lateral_accel
+        )
         target_speed = min(target_speed, curvature_speed_limit)
 
         # Lateral control using Pure Pursuit algorithm
@@ -1434,9 +1446,10 @@ class AlpamayoController:
             steering = 0.0
 
         # Longitudinal control (speed)
+        ctrl = self._config.control
         speed_error = target_speed - current_speed
-        throttle = np.clip(0.5 * speed_error, 0.0, 1.0)
-        brake = 0.0 if speed_error > -0.5 else 0.3
+        throttle = np.clip(ctrl.throttle_gain * speed_error, 0.0, 1.0)
+        brake = 0.0 if speed_error > ctrl.brake_threshold else ctrl.brake_value
 
         # Apply control
         control = carla.VehicleControl()
@@ -1512,7 +1525,9 @@ class AlpamayoController:
         target_speed *= speed_reduction_factor
 
         # Apply curvature-based speed limit (for safe cornering)
-        curvature_speed_limit = self._calculate_curvature_speed_limit(max_lateral_accel=4.0)
+        curvature_speed_limit = self._calculate_curvature_speed_limit(
+            max_lateral_accel=self._config.control.max_lateral_accel
+        )
         target_speed = min(target_speed, curvature_speed_limit)
 
         # Get current speed
@@ -1574,7 +1589,7 @@ class AlpamayoController:
         # Get speed limit from CARLA
         target_speed = self._get_carla_speed_limit()
         speed_error = target_speed - current_speed
-        throttle = np.clip(0.5 * speed_error, 0.0, 1.0)
+        throttle = np.clip(self._config.control.throttle_gain * speed_error, 0.0, 1.0)
 
         control = carla.VehicleControl()
         control.hand_brake = False  # Ensure handbrake is off
