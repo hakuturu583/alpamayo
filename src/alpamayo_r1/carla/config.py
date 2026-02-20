@@ -48,6 +48,7 @@ class ControlParams:
     rear_axle_offset: float = 0.5        # rear bumper → rear axle estimate [m]
     steering_alpha: float = 0.3          # EMA smoothing factor for steering (0=max smooth, 1=no smooth)
     target_speed_alpha: float = 0.4      # EMA smoothing factor for target speed (0=max smooth, 1=no smooth)
+    curvature_gain: float = 1.0          # scale factor on curvature command (<1 reduces inside-corner bias)
 
 
 @dataclass

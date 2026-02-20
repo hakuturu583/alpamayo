@@ -969,6 +969,13 @@ class AlpamayoController:
             ego_history_xyz = model_input["ego_history_xyz"]  # (1, 1, 16, 3)
             ego_history_rot = model_input["ego_history_rot"]  # (1, 1, 16, 3, 3)
 
+            # Apply curvature gain to reduce inside-corner bias from model
+            # sampled_action_tensor: (64, 2) = [accel, curvature]
+            curvature_gain = self._config.control.curvature_gain
+            if curvature_gain != 1.0:
+                sampled_action_tensor = sampled_action_tensor.clone()
+                sampled_action_tensor[:, 1] *= curvature_gain
+
             # Recompute trajectory with correct initial speed
             pred_xyz_corrected, pred_rot_corrected = self.model.action_space.action_to_traj(
                 sampled_action_tensor.unsqueeze(0),  # (1, 64, 2)

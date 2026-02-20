@@ -27,6 +27,7 @@ control:
   rear_axle_offset: 0.5         # rear bumper → rear axle estimate [m]
   steering_alpha: 0.2           # EMA smoothing: 0=max smooth, 1=no smooth
   target_speed_alpha: 0.4       # EMA smoothing for target speed: 0=max smooth, 1=no smooth
+  curvature_gain: 0.1           # curvature scale (<1 reduces inside-corner bias)
 
 inference:
   top_p: 0.98
