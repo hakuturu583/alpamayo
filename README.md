@@ -161,6 +161,110 @@ alpamayo/
 
 ## Troubleshooting
 
+## Practical controller recipe: Pure Pursuit + Speed PID
+
+If you are integrating Alpamayo 1 into a lightweight downstream stack, a practical baseline is:
+
+- **Lateral control**: Pure Pursuit tracking of the predicted trajectory.
+- **Longitudinal control**: Speed PID tracking a target speed profile extracted from the same trajectory.
+
+> ⚠️ This is still a research-oriented integration pattern and **not** a production-safe AV controller.
+
+### 1) Data flow at 10 Hz (reference)
+
+1. Run Alpamayo inference and get a future trajectory (e.g., 64 waypoints / 6.4 s).
+2. Convert waypoints to a local ego frame and compute per-waypoint heading/curvature/speed target.
+3. Select a lookahead point for Pure Pursuit.
+4. Compute steering from Pure Pursuit.
+5. Compute acceleration/brake command from speed PID.
+6. Apply actuator bounds and rate limits before sending commands.
+
+### 2) Pure Pursuit lateral control
+
+Given wheelbase `L`, lookahead distance `Ld`, and lookahead point `(x_L, y_L)` in the ego frame:
+
+```text
+alpha = atan2(y_L, x_L)
+kappa_cmd = 2 * sin(alpha) / Ld
+steer_cmd = atan(L * kappa_cmd)
+```
+
+Practical tuning:
+
+- Start with a speed-adaptive lookahead:
+  - `Ld = clamp(Ld_min + k_v * v, Ld_min, Ld_max)`
+- Example initial values for passenger-car scale:
+  - `Ld_min = 3.0 m`
+  - `Ld_max = 15.0 m`
+  - `k_v = 0.6 s`
+
+### 3) Speed PID longitudinal control
+
+Use nearest/future trajectory waypoint speed as `v_ref` and current ego speed as `v`:
+
+```text
+e_v = v_ref - v
+u_pid = Kp * e_v + Ki * integral(e_v) + Kd * d(e_v)/dt
+```
+
+Then map `u_pid` to accel/brake commands with saturation and anti-windup.
+
+Suggested initialization (must be re-tuned per platform):
+
+- `Kp = 0.8`
+- `Ki = 0.15`
+- `Kd = 0.02`
+- integral clamp: `[-1.5, 1.5]`
+
+### 4) Replan hysteresis (to reduce command flicker)
+
+For 10 Hz replanning, avoid abrupt command switching by blending with the previous plan:
+
+```text
+u_t = (1 - w_hys) * u_new_t + w_hys * u_prev_shifted_t
+```
+
+- `u_t` can be `[accel_t, kappa_t]`.
+- `u_prev_shifted_t` is previous cycle command sequence shifted by 1 step.
+- Start with `w_hys = 0.2` and dynamically reduce it during urgent maneuvers.
+
+Simple dynamic schedule:
+
+- normal driving: `w_hys = 0.2`
+- low TTC or large lateral error: `w_hys = 0.05`
+
+### 5) Minimal pseudocode
+
+```python
+# each control tick (10 Hz)
+traj = planner.predict(observation)  # Alpamayo output trajectory
+
+# lateral target
+Ld = clamp(Ld_min + k_v * ego_speed, Ld_min, Ld_max)
+pt = choose_lookahead_point(traj, Ld)
+alpha = math.atan2(pt.y, pt.x)
+kappa_new = 2.0 * math.sin(alpha) / max(Ld, 1e-3)
+
+# longitudinal target
+v_ref = sample_speed_reference(traj)
+e_v = v_ref - ego_speed
+accel_new = speed_pid.step(e_v, dt)
+
+# hysteresis blend
+w_hys = 0.05 if (ttc < 2.0 or abs(lat_err) > 0.4) else 0.2
+accel_cmd = (1 - w_hys) * accel_new + w_hys * prev_accel
+kappa_cmd = (1 - w_hys) * kappa_new + w_hys * prev_kappa
+
+# bounds + rate limits
+accel_cmd = clip(accel_cmd, accel_min, accel_max)
+kappa_cmd = clip(kappa_cmd, kappa_min, kappa_max)
+accel_cmd = rate_limit(accel_cmd, prev_accel, da_max)
+kappa_cmd = rate_limit(kappa_cmd, prev_kappa, dkappa_max)
+
+send_control(accel_cmd, kappa_cmd)
+prev_accel, prev_kappa = accel_cmd, kappa_cmd
+```
+
 ### Flash Attention issues
 
 The model uses Flash Attention 2 by default. If you encounter compatibility issues:
