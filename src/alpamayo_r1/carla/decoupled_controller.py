@@ -137,6 +137,30 @@ class DecoupledController:
 
         return trajectory_dense[idx], idx, cumulative_distances[idx]
 
+    @staticmethod
+    def truncate_at_flip(trajectory: np.ndarray) -> np.ndarray:
+        """Truncate trajectory at the first point where X decreases.
+
+        When the trajectory curves sharply, the X coordinate (forward axis)
+        may start decreasing. Points beyond this flip are unreliable for
+        Pure Pursuit and are discarded.
+
+        At least 2 points are always returned so that Pure Pursuit has a
+        valid target: if the flip occurs at i=1 (the very first step), the
+        first 2 points of the original trajectory are kept to preserve the
+        initial heading direction.
+
+        Args:
+            trajectory: (N, 3) array [x, y, z] in vehicle local frame
+
+        Returns:
+            Truncated trajectory with at least 2 points.
+        """
+        for i in range(1, len(trajectory)):
+            if trajectory[i][0] < trajectory[i - 1][0]:
+                return trajectory[:max(i, 2)]
+        return trajectory
+
     def compute_lateral_control(
         self, trajectory: np.ndarray
     ) -> Tuple[float, float, np.ndarray, int, float]:
@@ -153,6 +177,8 @@ class DecoupledController:
                 - target_idx: Index of target point in dense trajectory
                 - lookahead_distance: Actual lookahead distance used
         """
+        trajectory = self.truncate_at_flip(trajectory)
+
         if len(trajectory) < 2:
             # Not enough points, go straight
             return 0.0, 0.0, np.array([0.0, 0.0, 0.0]), 0, 0.0
